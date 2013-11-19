@@ -12,6 +12,8 @@ source('D:/GitHub/projects/temperatureProject/temperatureModelingFunctions.R')
 ```
 
 
+
+
 ```{r figure options}
 msWD <- 'D:/BEN/Manuscripts/2013-stream temp modeling/figures'
 dpiIn <- 200     # change to match journal requirements
