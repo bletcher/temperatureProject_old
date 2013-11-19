@@ -1,0 +1,460 @@
+```{r load et}
+
+load(paste('D:/GitHub/projects/temperatureProject/et','WB','.RData',sep=''))
+et$rain0 <- ifelse(is.na(et$rain), 0, et$rain) 
+et$rain0001 <- log(et$rain0 + 0.001)
+
+et$segLabel <- ifelse(et$segment == 2,'Rising','Falling')
+et$segLabel <- factor(et$segLabel,levels=c('Rising','Falling'), ordered=T)
+
+source('D:/GitHub/projects/temperatureProject/temperatureModelingFunctions.R')
+
+```
+
+
+```{r figure options}
+msWD <- 'D:/BEN/Manuscripts/2013-stream temp modeling/figures'
+dpiIn <- 200     # change to match journal requirements
+plotFigs <- T
+gBaseSize <- 10
+
+yearsForGraph <- 2002:2011
+#yearsForGraph <- 2005:2006
+sitesForGraph <- c('WB JIMMY','WB MITCHELL','WB OBEAR','WEST BROOK')#'WEST BROOK'
+#sitesForGraph <- c('WEST BROOK')#'WEST BROOK'
+
+et$siteText <- riverLabeller2('site',et$site)
+et$siteText <- factor(et$siteText,levels=c("WB","OL","OS","Is"),labels=c("WB","OL","OS","Is"), ordered=T)
+
+```
+
+# Look at raw data plot of air and water temperature
+```{r raw data plots,fig.width=10, fig.height=8}
+
+gRaw <- 
+  ggplot( et[et$year %in% yearsForGraph & et$site %in% sitesForGraph,], aes(dOY,temp))+
+  geom_point(size=0.5) +
+  geom_point( aes(dOY,airTemp), colour='red', size=0.5) +
+  theme_bw(base_size=gBaseSize) +
+#  theme(panel.grid.major = element_blank(),
+#        panel.grid.minor = element_blank())+
+  scale_y_continuous(expression(paste("Water temperature (",degree, "C)", sep = "")))+ 
+  scale_x_continuous('Day of year')+#, limit=c(0,40)) +
+  facet_wrap(~year); if(plotFigs) gRaw
+
+ggsave( file=paste(msWD,'/rawAirWaterTemps.png',sep=''), plot=gRaw, dpi=dpiIn , width=8,height=5, units='in' )
+
+gMosYearly <- 
+  ggplot( et[et$year %in% yearsForGraph & et$site %in% sitesForGraph ,], aes(airTemp,temp))+
+  geom_point() +
+  geom_smooth( method = 'nls', formula = y ~ m + ((a-m)/(1+exp(g*(b-x)))), se = F, start = list(a = 40,m = 0, g=1/15, b=10), size=1.25, colour='black') +
+  theme_bw(base_size=10) +
+  scale_x_continuous(expression(paste("Air temperature (",degree, "C)", sep = "")))+ 
+  scale_y_continuous(expression(paste("Water temperature (",degree, "C)", sep = ""))) +
+  facet_grid(siteText ~ year)
+
+ggsave( file=paste(msWD,'/mohseniYearly.png',sep=''), plot=gMosYearly, dpi=dpiIn , width=8,height=5, units='in' )
+```
+
+## Graph for checking breakpoints
+```{r breakpoint figure, fig.width=10, fig.height=8}
+# & et$site == 'WEST BROOK'
+# for MS
+gBP <- 
+  ggplot( et[et$year %in% yearsForGraph & et$site %in% sitesForGraph,], aes((dOY),(movingMean))) +
+ #ggplot( e[e$year==2006,], aes(dOY,tempIndex)) +
+  theme_bw(base_size=10) +
+  geom_point() +
+  geom_hline( aes(yintercept=quantileLo), colour='black') +
+  geom_hline( aes(yintercept=quantileHi), colour='black') +
+  geom_vline( aes(xintercept=as.numeric(springBP)),size=1.25) +
+  geom_vline( aes(xintercept=as.numeric(fallBP)),size=1.25) +
+  geom_vline( aes(xintercept=as.numeric(summerBP)),size=1.25) +
+  scale_x_continuous('Day of year')  +
+    scale_y_continuous('Temperature index', lim=c(-10,10))  +
+  facet_grid(siteText~year); if(plotFigs) gBP
+
+ggsave( file=paste(msWD,'/gBP.png',sep=''), plot=gBP, dpi=dpiIn , width=8,height=5, units='in',scale=2 )
+
+# make graph of breakpoints over time
+bp <- melt(unique( et[is.finite(et$springBP),c('siteText','springBP','summerBP','fallBP','year')]),id=c('siteText','year'))
+bp$siteBP <- paste(bp$siteText,bp$variable)
+
+lt <- c("solid","solid","solid","longdash","longdash","longdash",
+        "dashed","dashed","dashed",'dotted','dotted','dotted')
+
+gBPYear <- 
+ggplot( bp, aes(year,value)) +
+  geom_point(aes(shape=siteText), size=5)+
+  geom_line(aes(linetype=siteBP),size=1.1) +
+  theme_bw(base_size=10) +
+  scale_linetype_manual(values=lt) +
+  scale_y_continuous("Day of year") +
+  scale_x_continuous("Year", lim=c(2002,2011)); if(plotFigs) gBPYear
+
+ggsave( file=paste(msWD,'/gBPYear.png',sep=''), plot=gBPYear, dpi=dpiIn , width=6,height=5, units='in',scale=2 )
+
+
+```
+
+```{r main explanatory graph for MS}
+#sitesForGraph1 <- 'WEST BROOK'
+yearsForGraph <- 2000:2001
+yearsForGraph <- 2002:2011
+
+for (sitesForGraph1 in sitesForGraph) {
+print(sitesForGraph1)
+gAirWater <- 
+  ggplot( et[et$year %in% yearsForGraph & et$site %in% sitesForGraph1,], aes(dOY,airTemp) )+
+  theme_bw(base_size=10) +
+  #geom_point(size=.85) +
+  geom_line() +
+  #geom_point(aes(dOY,waterTempWPred), color='red',size=.85) +
+  geom_line(aes(dOY,temp), color='red') +
+  theme( axis.title.x = element_blank() ) +
+  scale_y_continuous(expression(paste("Temperature (",degree, "C)", sep = "")),lim=c(-20,30) )+
+  facet_wrap(~year,nrow=1)
+
+gTempIndex <- 
+  ggplot( et[et$year %in% yearsForGraph & et$site %in% sitesForGraph1,], aes((dOY),(movingMean))) +
+    theme_bw(base_size=10) +
+    geom_point() +
+   # geom_line() +
+    geom_hline( aes(yintercept=lo), colour='black') +
+    geom_hline( aes(yintercept=hi), colour='black') +
+    geom_vline( aes(xintercept=as.numeric(springBP)),size=1.5) +
+    geom_vline( aes(xintercept=as.numeric(fallBP)),size=1.5) +
+  #  geom_vline( aes(xintercept=as.numeric(summerBP)),size=1.5) +
+  #  scale_x_continuous()  +
+        theme( strip.text.x = element_blank() , 
+           strip.background = element_blank(),
+           axis.title.x = element_blank() ) +
+    scale_y_continuous('Moving mean of temperature index', lim=c(-15,10))  +
+    facet_wrap(~year,nrow=1)
+
+############### bp 2 ######
+
+tmp <- segDF[segDF$year %in% yearsForGraph & segDF$site %in% sitesForGraph1,]
+# need to add dummy rows for missing years to get those years included in facets
+missingYears <- yearsForGraph[!yearsForGraph %in% unique(tmp$year)]
+if( length( missingYears ) > 0 ) tmp <- rbind(tmp,data.frame(site=tmp$site[1],year=missingYears,dOY=NA,temp=NA,pred=NA))
+
+gSeg <- 
+  ggplot( tmp, aes(dOY,temp) ) +
+    geom_point() +
+    geom_line(aes(dOY,pred),color='red',size=1.2) +
+    theme_bw(base_size=10) +
+    scale_x_continuous('Day of year', lim=c(0,365))  +
+    theme( strip.text.x = element_blank() , 
+           strip.background = element_blank(),
+           axis.title.x = element_blank() ) +
+    scale_y_continuous(expression(paste("Water temperature (",degree, "C)", sep = "")), lim=(c(0,25))) +
+    facet_wrap(~ year,nrow=1 )
+###########
+
+gBP <- 
+  ggplot( et[et$year %in% yearsForGraph & et$site %in% sitesForGraph1,], aes((dOY),(movingMean))) +
+ #ggplot( e[e$year==2006,], aes(dOY,tempIndex)) +
+  theme_bw(base_size=10) +
+  theme(strip.text.x = element_blank() , 
+  strip.background = element_blank())+
+  geom_point() +
+  geom_line() +
+  geom_hline( aes(yintercept=lo), colour='black') +
+  geom_hline( aes(yintercept=hi), colour='black') +
+  geom_vline( aes(xintercept=as.numeric(springBP)),size=1) +
+  geom_vline( aes(xintercept=as.numeric(fallBP)),size=1.5) +
+  geom_vline( aes(xintercept=as.numeric(summerBP)),size=1.5) +
+  scale_x_continuous('Day of year')  +
+  scale_y_continuous('Moving mean of temperature index', lim=c(-75,50))  +
+  facet_wrap(~year,nrow=1)
+
+gIndex <- arrangeGrob( gAirWater,gTempIndex,gSeg,gBP,ncol=1,main=sitesForGraph1 )
+#ggsave( file=paste(msWD,'/gIndex1999_2011.png',sep=''), plot=gIndex, dpi=dpiIn , width=16,height=8, units='in', scale=2 )
+
+ggsave( file=paste(msWD,'/gIndex',min(yearsForGraph),'_',max(yearsForGraph),'_',sitesForGraph1,'.png',sep=''), plot=gIndex, dpi=dpiIn , width=10,height=8, units='in', scale=2 )
+
+}
+
+```
+
+
+# Slopes by segment
+```{r main regression plot for MS,fig.width=11, fig.height=9}
+yearsForGraph <- 2002:2011
+sitesForGraph <- c('WB JIMMY','WB MITCHELL','WB OBEAR','WEST BROOK')#'WEST BROOK'
+#sitesForGraph <- c('WB OBEAR','WEST BROOK')#'WEST BROOK'
+sitesForGraph <- c('WEST BROOK')#'WEST BROOK'
+
+et$segForColor <- ifelse(et$segment==1,3,ifelse(et$segment==2,1,2)) #easier than trying to get right colors using scale_...
+
+gSegs <- 
+ggplot( et[et$year %in% yearsForGraph & et$site %in% sitesForGraph & et$segment %in% 2:3,], aes( airTemp,temp, color=factor(segForColor) ))+
+  geom_point()+
+  geom_point(data=et[et$year %in% yearsForGraph & et$site %in% sitesForGraph & et$segment %in% 1,],aes(airTemp,temp)) +
+  geom_smooth( method='lm',se=F, size=1.25)+
+  theme_bw(base_size=10) +
+  theme(legend.position="none")+
+  scale_x_continuous(expression(paste("Air temperature (",degree, "C)", sep = ""))) +
+  scale_y_continuous(expression(paste("Water temperature (",degree, "C)", sep = "")), lim=c(-1,22)) +
+  facet_wrap( ~ year) ; if(plotFigs) gSegs
+
+ggsave( file=paste(msWD,'/gSegs.png',sep=''), plot=gSegs, dpi=dpiIn , width=8,height=5, units='in', scale=2 )
+
+# just slopes for all sites
+yearsForGraph <- 2002:2011
+sitesForGraph <- c('WB JIMMY','WB MITCHELL','WB OBEAR','WEST BROOK')
+
+gSegsSites <- 
+ggplot( et[et$year %in% yearsForGraph & et$site %in% sitesForGraph & et$segment %in% 2:3,], aes( airTemp,temp ))+
+  geom_smooth( aes(color=siteText),method='lm',se=F, size=1.1)+
+  theme_bw(base_size=10) +
+ # theme(legend.position="none")+
+  scale_x_continuous(expression(paste("Air temperature (",degree, "C)", sep = ""))) +
+  scale_y_continuous(expression(paste("Water temperature (",degree, "C)", sep = "")), lim=c(-1,22)) +
+  scale_colour_manual(values = c('black', "green",'red','blue')) +
+  facet_wrap(segLabel~year,nrow=4 ) ; if(plotFigs) gSegsSites
+
+ggsave( file=paste(msWD,'/gSegsSites.png',sep=''), plot=gSegsSites, dpi=dpiIn , width=6,height=5, units='in', scale=2 )
+
+
+```
+
+
+# Statistical models by segment
+Simple lm's (temp ~ airTemp...) with segment and site and year as a factor
+Most complex model is by far the best based on AIC
+```{r, lm models}
+yearsForReg <- 2002:2011
+sitesForReg <- c('WB OBEAR','WEST BROOK')
+sitesForReg <- c('WB JIMMY','WB MITCHELL','WB OBEAR','WEST BROOK')
+
+dat <- et[et$year %in% yearsForReg & et$site %in% sitesForReg & et$segment %in% 2:3,]
+
+m1a <- lm( temp ~ airTemp*factor(segment),                                     data=dat)
+m1b <- lm( temp ~ airTemp*factor(segment)*factor(year),                        data=dat)
+m1c <- lm( temp ~ airTemp*factor(segment)*factor(year)*factor(site),           data=dat)
+m1d <- lm( temp ~ airTemp*factor(segment)*factor(year)*factor(site) + flow,    data=dat)
+m1e <- lm( temp ~ airTemp*factor(segment)*factor(year)*factor(site) * flow,    data=dat)
+
+AIC(m1a,m1b,m1c,m1d,m1e)
+plot(residuals(m1a))
+acf(residuals(m1a))
+summary(m1e)
+
+#anova(m1a,m1b,m1c,m1d,m1e)
+
+#predict(m1e,data.frame(airTemp=3,segment=1,yearSegment=1999,flow=10:20),se.fit=T)
+```
+
+```{r look for patterns in flow and rain effects on air/water in 2D}
+
+
+ggplot( e[e$year %in% 2006:2009 &e$segment %in% 2 ,], aes( airTemp,waterTempWPred ))+
+  geom_point(aes( colour=log(flow)))+
+  geom_path(aes( colour=log(flow)))+
+ # geom_point(aes( colour=(rain0001 )))+
+#   geom_path(aes( colour=(rain0001 )))+
+ # geom_text(aes(label=dOY,color=factor(dOY)))+
+  geom_smooth( method='lm',se=F)+
+  scale_colour_gradientn(colours = rainbow(3))+
+  facet_grid(segment~year)
+
+```
+
+
+Random effects models across years with segment as a factor
+```{r RE models, cache=TRUE}
+
+yearsForReg <- 2002:2011
+sitesForReg <- c('WB OBEAR')
+sitesForReg <- c('WB JIMMY','WB MITCHELL','WB OBEAR','WEST BROOK')
+
+
+#dat <- et[et$yearSegment %in% yearsForReg & et$site %in% sitesForReg & et$segment %in% 2:3,]
+dat <- et[et$year %in% yearsForReg & et$site %in% sitesForReg & et$segment %in% 2:3,]
+
+m2a <- lmer( temp ~   airTemp*factor(segment)* factor(site) * flowZScore + (1|year),                                data=dat)
+m2b <- lmer( temp ~   airTemp*factor(segment)* factor(site) * flowZScore + (factor(segment)|year),                  data=dat)
+#m2c <- lmer( temp ~   airTemp*factor(segment)* factor(site) * flowZScore + (factor(site)|year),                  data=dat)
+# does not converge
+m2c <- lmer( temp ~   airTemp*factor(segment)* factor(site) * flowZScore + (factor(segment)|year) + (factor(site)|year),                  data=dat)
+
+# sticking with m2b because want to account for yearly effects but leave variation in other effects in the fixed effects
+
+m2b <- lmer( temp ~   airTemp*factor(segment)* flowScaled + (airTemp|year),                                        data=dat)
+m2c <- lmer( temp ~   airTemp*factor(segment)* flowScaled + (airTemp|year)+(1|year),                        data=dat)
+m2d <- lmer( temp ~   airTemp*factor(segment)* flowScaled + (airTemp|year)+(flowScaled|year),                     data=dat)
+m2e <- lmer( temp ~   airTemp*factor(segment)* flowScaled + (airTemp|year)+(flowScaled*factor(segment)|year),     data=dat)
+m2f <- lmer( temp ~   airTemp*factor(segment)* flowScaled + (1+airTemp|year)+(1+flowScaled*factor(segment)|year), data=dat) # same as m2e
+m2g <- lmer( temp ~ 0+airTemp*factor(segment)* flowScaled + (0+airTemp|year)+(0+flowScaled*factor(segment)|year), data=dat) 
+
+AIC(m2a,m2b)
+summary(m2b)
+
+#check flow stats
+ggplot(dat,aes(flowScaled))+
+  geom_freqpoly(aes(color=factor(site)))+
+  facet_wrap(~year)
+
+```
+
+```{r predicted values}
+mod <- m2b
+f <- fixef(mod)
+
+# to help identify airTemp axis label boundaries
+quants <- ddply(et[!is.na(et$segment),],.(site,segment),summarise,
+                  lo=quantile(airTemp,probs=c(0.025),na.rm=T),
+                  hi=quantile(airTemp,probs=c(0.975),na.rm=T))
+
+
+pAirTemp <- c(5,24)
+pSegment <- 2:3
+pFlow <- c(-2,-1,0,1,2)
+pSite <- c('WB JIMMY','WB MITCHELL','WB OBEAR','WEST BROOK')
+#pSite <- c('WB OBEAR','WEST BROOK')
+#pSite <- c('WB OBEAR')
+pIn <- expand.grid(airTemp=pAirTemp,segment=pSegment,flowZScore=pFlow,site=pSite)
+
+pIn$pred <- predict(mod,REform=NA,newdata=pIn) #REform=NA means REs are set to 0
+
+pIn$segLabel <- ifelse(pIn$segment == 2,'Rising','Falling')
+pIn$segLabel <- factor(pIn$segLabel,levels=c('Rising','Falling'), ordered=T)
+
+pIn$riverText <- riverLabeller('site',pIn$site)
+pIn$riverText <- factor(pIn$riverText,levels=c('WEST BROOK','WB JIMMY','WB MITCHELL','WB OBEAR'),labels=c("WB","OL","OS","Is"), ordered=T)
+
+gPred <- 
+ggplot( pIn, aes(airTemp,pred)) +
+  geom_point(aes(shape=factor(flowZScore)),size=3) +
+  geom_line(aes(linetype=factor(flowZScore)),size=1) +
+  theme_bw(base_size=10) +
+#  theme(legend.position="none")+
+  scale_x_continuous(expression(paste("Air temperature (",degree, "C)", sep = ""))) +
+  scale_y_continuous(expression(paste("Predicted water temperature (",degree, "C)", sep = ""))) +
+#  ggtitle(mod@call)+
+  facet_grid(riverText~segLabel); if(plotFigs)gPred
+
+ggsave( file=paste(msWD,'/gPred.png',sep=''), plot=gPred, dpi=dpiIn , width=6,height=5, units='in',scale=2 )
+
+```
+
+```{r slopes and lengths graphs}
+
+#Couldn't find any evidence for prcp affecting the rise 
+
+ggplot( et[et$year %in% 2009  &et$segment %in% 2:3 ,], aes( airTemp,temp ))+
+  geom_point(aes( colour=log(flow))) +
+  geom_path(aes( colour=log(flow)))+
+ # geom_point(aes( colour=(rain0001 )))+
+#   geom_path(aes( colour=(rain0001 )))+
+ # geom_text(aes(label=dOY,color=factor(dOY)))+
+  geom_smooth( method='lm',se=F)+
+  scale_colour_gradientn(colours = rainbow(3))+
+  facet_grid(segment~site)
+
+ggplot( et[et$year %in% 2009  &et$segment %in% 2:3 & et$dOY<275 ,], aes( dOY,slopeSegSlopeDiff ))+
+  geom_point(aes(color=site)) +
+ geom_line(aes(color=site)) +
+  scale_y_continuous(lim=c(-2,2))
+
+ggplot( et[et$year %in% 2009 & et$segment %in% 2:3,], aes( slope ))+
+  stat_ecdf(aes(color=site))+
+  facet_grid(year~segment)
+
+ggplot( et[ et$segment %in% 2:3 & et$year %in% 2002:2004,], aes( slopeSegSlopeDiff ))+
+  geom_freqpoly(aes(color=site))+
+  facet_grid(segment~year)
+
+ggplot( et[ et$segment %in% 2:3& et$year %in% 2003:2006,], aes( site,slopeSegSlopeDiff ))+
+  geom_boxplot(aes(color=site))+
+  scale_y_continuous(lim=c(-1,1))+
+  facet_grid(segment~year)
+
+m1 <- lmer( slopeSegSlopeDiff ~ factor(segment) + (segment|year), data = et[ et$segment %in% 2:3 & is.finite(et$slopeSegSlopeDiff),])
+
+m2 <- lmer( slopeSegSlopeDiff ~ factor(site)*factor(segment) + (segment|year), data = et[ et$segment %in% 2:3 & is.finite(et$slopeSegSlopeDiff),])
+
+AIC(m1,m2) # no site effect
+
+m1 <- lm(slopeSegSlopeDiff ~ factor(site)*factor(segment),data = et[ et$segment %in% 2:3 & is.finite(et$slopeSegSlopeDiff) & et$year %in% 2002:2011,])
+
+m2 <- lm(slopeSegSlopeDiff ~ factor(site)*factor(segment)*factor(year),data = et[ et$segment %in% 2:3 & is.finite(et$slopeSegSlopeDiff) & et$year %in% 2002:2011,])
+
+AIC(m1,m2) # no year effect
+
+
+ggplot( et[et$year==2008,], aes(slope)) +
+  geom_freqpoly(aes(color=site))+
+  facet_wrap(~segment)
+
+yearsForGraph <- 2003:2011
+sitesForGraph <- c('WB JIMMY','WB MITCHELL','WB OBEAR','WEST BROOK')#'WEST BROOK'
+sitesForGraph <- c('WB JIMMY','WEST BROOK')#'WEST BROOK'
+
+ggplot( et[et$year %in% yearsForGraph & et$site %in% sitesForGraph & et$segment %in% 2:3,], aes( airTemp,temp, color=factor(site) ))+
+#  geom_point()+
+  geom_smooth( method='lm',se=F, size=1.25)+
+  theme_bw(base_size=10) +
+ # theme(legend.position="none")+
+  scale_x_continuous(expression(paste("Air temperature (",degree, "C)", sep = ""))) +
+  scale_y_continuous(expression(paste("Water temperature (",degree, "C)", sep = "")), lim=c(-1,22)) +
+  facet_grid(segment~year)#Segment ) 
+
+# some evidence that reservoir streams heat faster with higher flow in seg 2
+ggplot( et[et$year %in% yearsForGraph & et$site %in% sitesForGraph & et$segment %in% 2:3
+#           & et$rain0>0
+           ,], aes( prcp,rise, color=factor(site) ))+
+ # geom_point() +
+  geom_smooth(method='lm',se=F)+
+#  scale_x_continuous(lim=c(0,5))+
+  facet_grid(segment~year, scales='free')
+
+# with prcp==0
+m1 <- lm(rise ~ factor(site)*factor(segment)*prcp,data = et[ et$segment %in% 2:3  & et$year %in% 2002:2011,])
+m2 <- lm(rise ~ factor(site)*factor(segment)*factor(year)*prcp,data = et[ et$segment %in% 2:3  & et$year %in% 2002:2011,])
+AIC(m1,m2)
+
+# prcp>0
+
+m1a <- lm(rise ~ factor(site)*factor(segment)*prcp,data = et[ et$segment %in% 2:3  & et$year %in% 2002:2011& et$prcp>0,])
+m2a <- lm(rise ~ factor(site)*factor(segment)*factor(year)*prcp,data = et[ et$segment %in% 2:3  & et$year %in% 2002:2011& et$prcp>0,])
+AIC(m1a,m2a)
+
+# makes no difference in output
+m1b <- lmer(rise ~ factor(site)*factor(segment)*prcp + (1|year),data = et[ et$segment %in% 2:3  & et$year %in% 2002:2011& et$prcp>0,])
+
+pSegment <- 2:3
+pprcp <- seq(0,50,10)
+pSite <- c('WB JIMMY','WB MITCHELL','WB OBEAR','WEST BROOK')
+pIn <- expand.grid(segment=pSegment,prcp=pprcp,site=pSite)
+
+pIn$pred <- predict(m1b,newdata=pIn) #REform=NA means REs are set to 0
+pIn$pred <- predict(m1b,REform=NA,newdata=pIn) #REform=NA means REs are set to 0
+
+ggplot( pIn, aes(prcp,(pred))) +
+  geom_line(aes(color = factor(site))) +
+  facet_grid(~segment)
+```
+
+```{r bp by year - this is a repeat}
+breaks$siteText <- riverLabeller2('site',breaks$site)
+
+yearsForGraph <- 2002:2011
+b <- melt(breaks[breaks$year %in% yearsForGraph,c('siteText','year','springBP','summerBP','fallBP')], id=c('siteText','year'))
+b$siteBP <- paste(b$siteText,b$variable)
+
+gBP2 <- 
+  ggplot( b, aes( year, value ) ) +
+  geom_point(aes(shape=siteText,color=siteText),size=5) +
+  geom_line(aes(group=siteBP, color=siteText),size=1.25) +
+  theme_bw(base_size=10) +
+#    theme(legend.position="none")+
+  scale_y_continuous('Day of year') +
+  scale_x_continuous('Year'); if(plotFigs)gBP2
+
+ggsave( file=paste(msWD,'/gBP2.png',sep=''), plot=gBP2, dpi=dpiIn , width=8,height=5, units='in',scale=2 )
+
+```
+

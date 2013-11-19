@@ -1,0 +1,1512 @@
+# this file is for multiple sites, also works for a single site
+
+# use of max vs min airTemp in addition to mean air temp
+
+
+```{r load libraries}
+rm(list=ls())
+
+library(ggplot2)
+library(GGally)
+library(gridExtra)
+library(reshape2)
+library(mgcv)
+library(nlme)
+library(plyr)
+library(segmented)
+library(zoo)
+library(ggmap)
+library(pls)
+library(MASS)
+library(lme4) 
+library(DataCombine) # for the slide function
+
+source('D:/GitHub/projects/temperatureProject/temperatureModelingFunctions.R')
+```
+
+```{r choose data source}
+
+fileSource <- 'Kyle'
+setwd('D:/GitHub/data/temperature/fromKyle/BP_Analysis/BP_Analysis')
+
+
+fileSource <- 'Craig'
+setwd('D:/GitHub/data/temperature/fromCraigDEWA')
+
+#fileSource <- 'Leslie'
+#setwd('D:/GitHub/data/temperature/fromLeslie')
+
+fileSource <- 'WB'
+setwd('D:/GitHub/data/temperature/fromWB')
+
+```
+
+```{r rerun or load previous?}
+
+reRunBP <- T
+
+if( !reRunBP ) {
+  load(file=paste('D:/GitHub/projects/temperatureProject/e',fileSource,'.RData',sep=''))
+  load(file=paste('D:/GitHub/projects/temperatureProject/et',fileSource,'.RData',sep=''))
+               }
+
+```
+
+```{r make graphs?}
+# settings variables
+makeSpringFallGraphs <- T
+```
+
+
+```{r load data}
+if ( reRunBP ){
+
+if( fileSource == 'Kyle'){
+  setwd('D:/GitHub/data/temperature/fromKyle/BP_Analysis/BP_Analysis')
+  load("Breakpoint_Analysis_Data_ALL_BEST_SITES.RData")  #master.data
+  master.data$flow <- NA
+}
+if( fileSource == 'Leslie'){
+  setwd('D:/GitHub/data/temperature/fromLeslie')
+  master.data <- read.csv("Breakpoint_Data_FHR.csv",header=T)  #master.data
+  master.data$flow <- NA
+  md <- ddply(master.data,.(site,year),summarise,min=min(dOY),max=max(dOY))
+  ggplot(md, aes(site,ymin=min,ymax=max,color=factor(year)))+geom_linerange()
+}
+if( fileSource == 'Craig'){
+  setwd('D:/GitHub/data/temperature/fromCraigDEWA')
+  master.data <- read.csv("DEWA_TempData_letcher.csv",header=T)  #master.data
+  master.data <- master.data[!is.na(master.data$dOY) & !is.na(master.data$year), ] #get rid of rows with all NAs
+  master.data$flow <- NA
+  md <- ddply(master.data,.(site,year),summarise,min=min(dOY),max=max(dOY))
+  ggplot(md, aes(site,ymin=min,ymax=max,color=factor(year)))+geom_linerange()
+}
+
+if( fileSource == 'WB'){
+  #setwd('d:/PITTAGMAIN/CMR Analyses/Hierach_Bugs/allSpp')
+  master.data <-  read.csv('d:/GitHub/data/temperature/fromWB/envData.txt',header=T)  #master.data
+  master.data <- master.data[ master.data$River %in% c( 'WEST BROOK','WB OBEAR','WB JIMMY','WB MITCHELL' ), ]
+  master.data$site <- master.data$River
+  master.data$site  <- factor(master.data$site)
+  
+  master.data$date <- as.POSIXct(strptime(master.data$Date, format = "%m/%d/%Y"))
+  master.data$year <- as.numeric(strftime(master.data$date, '%Y'))
+  master.data$dOY <- as.numeric(strftime(master.data$date, '%j'))
+  master.data$temp <- master.data$AvgOfAvg.Daily.Temp
+  master.data$rain <- master.data$AvgOfTotal.Rain
+  master.data$flow <- master.data$AvgOfAvg.Daily.Discharge
+  
+  ### read in day-met
+  dm1 <-  read.csv('d:/GitHub/data/daymet_westbrook.csv',header=T)
+  dm <- dm1[dm1$year > 1996,]
+  
+  dm$tAirMin <- dm$tAirMinDM <- dm$tmin; dm$tAirMax <- dm$tAirMaxDM <- dm$tmax
+  dm$airTemp <- dm$airTempDM <- (dm$tAirMinDM+dm$tAirMaxDM)/2
+  
+  dm$date <- as.POSIXct(strptime(paste(dm$year, dm$yday), format="%Y %j")) 
+  dm$dOY <- dm$yday
+  #master.data <- merge(x=master.data,y=dm[,c('date','tAirMax','tAirMin','airTemp','prcp','dayl')], by='date', all.x=T)
+  master.data <- merge(x=master.data,y=dm[,c('date','airTemp','prcp','srad')], by='date', all.x=T)
+  # just to make sure the merge doens't screw up order
+  master.data <- master.data[order(master.data$date),]
+  
+  master.data$Drainage <- NULL;master.data$River <- NULL;master.data$Date <- NULL;master.data$AvgOfAvg.Daily.Temp <- NULL;master.data$AvgOfAvg.Daily.Discharge <- NULL;
+  master.data$AvgOfTotal.Rain <- NULL;master.data$Drainage <- NULL;
+  
+  md <- ddply(master.data,.(site,year),summarise,min=min(dOY),max=max(dOY))
+  ggplot(md, aes(site,ymin=min,ymax=max,color=factor(year)))+geom_linerange()
+  
+  setwd('D:/GitHub/data/temperature/fromWB')
+  
+  
+
+ }
+}
+```
+
+###############################################
+# format for input file
+# > str(master.data)
+# 'data.frame':  650534 obs. of  7 variables:
+#   $ date   : Date, format: "2005-07-01" "2005-07-02" "2005-07-03" ...
+# $ dOY    : num  182 183 184 185 186 187 188 189 190 191 ...
+# $ year   : num  2005 2005 2005 2005 2005 ...
+# $ site   : Factor w/ 195 levels "Cent55","Cent60",..: 10 10 10 10 10 10 10 10 10 10 ...
+# $ temp   : num  NA NA NA NA NA NA NA NA NA NA ...
+# $ airTemp: num  NA NA NA NA NA NA NA NA NA NA ...
+# $ rain   : num  0.88 0 0 0 1.48
+# $ flow   : num
+##############################################
+
+# need to make sure that dOY is consecutive within a year_site combo, otherwise the slide function will line up non-consecutive dOYs
+# If a df doesn't have consec dOY could use functions in zoo or do the indexing explicitly
+
+```{r data prep}
+
+siteList <- unique(master.data$site)
+
+e <- master.data
+rm(master.data) # to save memory
+
+# fill in missing WB data based on WB/trib relationship
+if( fileSource == 'WB') source('D:/GitHub/projects/temperatureProject/getPredictedForWB.R')
+
+# remove rows that don't have both temp and airTemp to save df space and runs times
+### DON'T do this, becuase is removes dOY and makes sequence calcs (like moving mean) not work (jumps gaps)
+#e <- e[!is.na(e$temp) & !is.na(e$airTemp),]
+
+# WB is not in the right order, don't rename
+if( fileSource != 'WB'){names(e) <- c('date','dOY','year','site','temp','airTemp','rain','flow')}
+
+# don't really use this
+e$season <- ifelse( e$dOY<80,1,
+            ifelse( e$dOY<172,2,
+            ifelse( e$dOY<264,3, 
+            ifelse( e$dOY<355,4,1  ))))
+e$season <- ifelse( e$dOY>355,1,e$season )
+
+# this is the key metric for estimating the synchrony between air and water temp 
+e$tempIndex <- (e$temp-e$airTemp)/(e$temp + 0.00000001) # add small # to avoid Inf
+
+# fill in missing dOY so sequence calcs (like moving mean, slope etc) 
+
+
+# lag by group
+e <- e[order(e$site,e$year,e$dOY),]
+#For checking the order of e:
+e$count <- 1:length(e$year)
+
+
+e$siteYear <- paste(e$site,e$year,sep='_')
+e <- slide(e, Var = "temp", GroupVar = "siteYear", slideBy = +1)
+e <- slide(e, Var = "airTemp", GroupVar = "siteYear", slideBy = +1)
+
+e$rise <- e$temp1 - e$temp
+e$run  <- e$airTemp1 - e$airTemp
+e$slope <- e$rise / e$run
+e$length <- sqrt(e$rise^2 + e$run^2)
+e$angle <- atan(e$rise/e$run) * 180/pi # need to check radian units...
+
+# for dOY changes
+e$waterDelta <-    e$temp1 -    e$temp
+  e$airDelta <- e$airTemp1 - e$airTemp
+
+
+#scaled flow by site
+# get the zScores 'manually'
+bySite <- ddply(e, .(site), summarise, meanFlowBySite=mean(flow,na.rm=T),stdFlowBySite=sd(flow,na.rm=T))
+e <- merge( x=e, y=bySite, all.x=T )
+e$flowZScore <- (e$flow-e$meanFlowBySite)/e$stdFlowBySite
+
+#Across site - shouldn't use for stats
+#et$flowScaled <- scale(et$flow)
+
+e <- e[order(e$count),]
+
+```
+
+```{r moving mean}
+#===============================================================================
+#Get moving mean and SD of temp index for each site and put into the data frame:
+#===============================================================================
+window <- 10 # frame sizefor moving mean, which is centered by default
+
+nSites <- length(siteList)
+siteYearCombos <- unique(e[,c('site','year')])
+#siteYearCombos$site  <- factor(siteYearCombos$site)
+
+e$movingMean <- NA
+e$movingSD <- NA
+
+for (i in 1:nrow(siteYearCombos)){
+
+  print(c(i,as.character(siteYearCombos$site[i]),siteYearCombos$year[i]))
+  
+  currSite <- which(e$site == as.character(siteYearCombos$site[i]) & e$year == siteYearCombos$year[i] )
+
+  currMean <-  rollapply(e$tempIndex[currSite], width=window, fill=NA, mean)
+  currSD <-    rollapply(e$tempIndex[currSite], width=window, fill=NA, sd)
+
+  e$movingMean[currSite] <- currMean
+    e$movingSD[currSite] <- currSD
+}
+
+#e <- cbind(e, movingMean=movingMean[2:length(movingMean)], movingSD=movingSD[2:length(movingSD)])
+
+e$meanSDDiff <- e$movingSD - e$movingMean
+
+# just to make sure the merge doens't screw up order
+e <- e[order(e$count),]
+
+# look at some raw data
+
+#ggplot( e[e$site == e$site[2] ,], aes(dOY,temp) ) + geom_point() + geom_point(aes(dOY,airTemp),color='red') + facet_grid(site~year)
+
+#table( e$year,e$site,is.na( e$temp ) )
+
+```
+
+```{r breaks df}
+
+#################################################
+# set up breaks df
+#################################################
+
+breaks <- data.frame(array(NA,c(nrow(siteYearCombos),7)))
+names(breaks) <- c('site','year','springBP','summerBP','fallBP','quantileLo','quantileHi')
+breaks$fallBPComplete <- FALSE
+breaks$springBPComplete <- FALSE
+breaks$springOrFallBPComplete <- FALSE
+breaks$summerBPComplete <- FALSE
+
+breaks$quantileLo <- NA
+breaks$quantileHi <- NA
+
+beginningDayForCI <- 125
+endingDayForCI <- 275
+loCI <- 0.001
+hiCI <- 0.999
+
+
+for ( i in 1:nrow(siteYearCombos)){
+  print(i)
+  breaks$year[i] <- as.numeric(siteYearCombos$year[i])
+  breaks$site[i] <- as.character(siteYearCombos$site[i]) #would like this to stay a factor, but it ends up as numeric in 'breaks'. not sure why
+ 
+  tmp <- e[e$site == siteYearCombos$site[i] & e$year  %in% siteYearCombos$year[i] & e$dOY %in% beginningDayForCI:endingDayForCI,'tempIndex']
+  if (any(!is.na(tmp))){
+    TIQ <- quantile(tmp, probs=c(loCI,0.5,hiCI),na.rm=T)
+    #  movingSDQ <- quantile(e[e$site == siteList[j] & e$year  %in% year & e$dOY %in% beginningDayForCI:endingDayForCI, 'movingSD'], probs=c(0.005,0.5,0.995),na.rm=T)
+    
+    breaks$quantileLo[i] <- TIQ[1]
+    breaks$quantileHi[i] <- TIQ[3]
+  
+  }
+}  
+
+```
+
+```{r Spring/fall bp}
+
+#===================================================================================
+#Use runs analysis of the movingMean to define spring and fall breakpoints:
+#===================================================================================
+
+minCompleteDOYBP1 <- 15
+maxCompleteDOYBP1 <- 175
+numForCompleteBP1 <- round( ( maxCompleteDOYBP1-minCompleteDOYBP1 ) * 0.9 )
+minCompleteDOYBP3 <- 225
+maxCompleteDOYBP3 <- 350
+numForCompleteBP3 <- round( ( maxCompleteDOYBP3-minCompleteDOYBP3 ) * 0.9 )
+
+numForward <- 14 + 1 #number of days in a row that need to be within the CIs to get assigned synchronised
+numForward <- 7 + 0 #number of days in a row that need to be within the CIs to get assigned synchronised
+
+
+for (j in 1:nSites){
+  
+  curSite <- which(e$site == siteList[j])
+	e1 <- e[curSite,]
+
+	e3Spring <- e1[ e1$dOY >= minCompleteDOYBP1 & e1$dOY <= maxCompleteDOYBP1, ]
+	
+	completeYearsSpring <- NULL #empty out from previous run
+  
+  if ( !empty( e3Spring ) ) {  #in case e3Spring is empty - avoids error
+	  completeSpring <- as.data.frame( table( e3Spring$year,is.na( e3Spring$temp ) ) )
+	  incompleteYearsSpring <- as.numeric(as.character(completeSpring$Var1[completeSpring$Var2 == 'FALSE' & completeSpring$Freq <  numForCompleteBP1]))
+	  completeYearsSpring <-   as.numeric(as.character(completeSpring$Var1[completeSpring$Var2 == 'FALSE' & completeSpring$Freq >= numForCompleteBP1]))
+  }
+  
+	e3Fall <- e1[ e1$dOY >= minCompleteDOYBP3 & e1$dOY <= maxCompleteDOYBP3, ]
+	
+  completeYearsFall <- NULL
+	
+	if ( !empty( e3Fall ) ) {
+	  completeFall <- as.data.frame( table( e3Fall$year,is.na( e3Fall$temp ) ) )
+	  incompleteYearsFall <- as.numeric(as.character(completeFall$Var1[completeFall$Var2 == 'FALSE' & completeFall$Freq <  numForCompleteBP3]))
+	  completeYearsFall <-   as.numeric(as.character(completeFall$Var1[completeFall$Var2 == 'FALSE' & completeFall$Freq >= numForCompleteBP3]))
+	} 
+  
+	completeYearsSpringOrFall <- unique(c(completeYearsSpring,completeYearsFall))
+	#quantiles <- data.frame(year=c(min(e1$year):max(e1$year)))
+	#quantiles$lo <- NA
+	#quantiles$hi <- NA 
+	
+	for (year in completeYearsSpringOrFall){ 
+
+	  breaks$springOrFallBPComplete[ breaks$year == year & breaks$site == siteList[j] ] <- TRUE
+	  print(c('BP 1 and 3',j,as.character(siteList[j]),year))
+ 
+    lo <- breaks$quantileLo[breaks$year == year & breaks$site == siteList[j]] 
+    hi <- breaks$quantileHi[breaks$year == year & breaks$site == siteList[j]] 
+    
+		runs <- data.frame(array(NA,c(1,numForward)))
+		eYear <- e1[e1$year == year, ] 
+
+		if(year %in% completeYearsSpring){
+			
+			#out <- segmented( lm(temp~dOY, data=e1[e1$year == year,]), seg.Z=~dOY, psi=list(dOY=c(100,200)))
+			#tryCatch({out <- segmented( lm(temp~dOY, data=e1[e1$year == year,]), seg.Z=~dOY, psi=list(dOY=c(100,200)))},error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+
+			# time forward until approx breakpoint ascending/descending water temp (in 'breaks')
+			for (i in 1:(200)){ #-window*winFactor )){
+				for (ii in 2:numForward ){
+          
+          if( (i+ii-2) %in% eYear$dOY ) {   # amke sure that the dOY is in the looping variable      
+			  	  runs[ i,ii ] <- 1*((eYear$movingMean[ eYear$dOY == (i+ii-2) ] >= lo) & (eYear$movingMean[ eYear$dOY == (i+ii-2) ] <= hi))
+          } else
+            runs[ i,ii ] <- 1  
+
+				}
+				runs[ i,1 ] <- prod( runs[ i, 2:numForward ] )
+			}
+			breaks$springBP[ breaks$year == year & breaks$site == siteList[j] ] <- min(which(runs[,1] == 1))
+			breaks$springBPComplete[ breaks$year == year & breaks$site == siteList[j] ] <- TRUE
+		}
+      
+	 if(year %in% completeYearsFall){
+			# Make this not arbitrary
+			# time backward until approx breakpoint ascending/descending water temp (in 'breaks')
+	   stopLoop <- max( c( minCompleteDOYBP3,min(eYear$dOY)+numForward + 1 ) )  # to keep from going past lower limit if dOY
+			for (i in  max(eYear$dOY):stopLoop){
+				for (ii in 2:numForward ){
+          
+				  if( (i-ii+2) %in% eYear$dOY ) { 
+					  runs[ i,ii ] <- 1*((eYear$movingMean[ eYear$dOY == (i-ii+2) ] >= lo) & (eYear$movingMean[ eYear$dOY == (i-ii+2) ] <= hi))
+				  } else
+				    runs[ i,ii ] <- 1 
+				}
+				runs[ i,1 ] <- prod( runs[ i, 2:numForward ] )
+			}
+			breaks$fallBP[ breaks$year == year & breaks$site == siteList[j] ] <- max(which(runs[,1] == 1))
+			breaks$fallBPComplete[ breaks$year == year & breaks$site == siteList[j] ] <- TRUE
+		}			
+			
+#		} #completeYears loop
+	} #year loop
+} #site loop
+
+# add in means for missing BP. use the xBPWMean below to constrain the date range for estimating BP 2 
+meanBP <- ddply( breaks, .(site), summarise, meanSpringBP = mean(springBP,na.rm=T), meanFallBP = mean(fallBP,na.rm=T) )
+breaks$meanSpringBP <- NULL; breaks$meanFallBP <- NULL # in case we've merged before
+
+breaks <- merge( x=breaks, y= meanBP, all.x=T, by=c('site') )
+
+breaks$springBPWMean <- ifelse( is.na(breaks$springBP), breaks$meanSpringBP, breaks$springBP )
+breaks$springBPWMean <- ifelse( !is.finite(breaks$springBPWMean), mean(breaks$meanSpringBP[is.finite(breaks$meanSpringBP)]), breaks$springBPWMean )
+
+breaks$fallBPWMean <- ifelse( is.na(breaks$fallBP), breaks$meanFallBP, breaks$fallBP )
+breaks$fallBPWMean <- ifelse( !is.finite(breaks$fallBPWMean), mean(breaks$meanFallBP[is.finite(breaks$meanFallBP)]), breaks$fallBPWMean )
+
+# can have empty breakPoints if don't calculate a mean across years for each site in the ddply above
+# i.e. only data for one year in a site or no years have data before the spring cutoff or after the fall cutoff
+# in this case, just fill in the cutoffs, so the summer breakPoint can be calculated
+breaks$springBPWMean[is.na(breaks$springBPWMean )] <- minCompleteDOYBP1
+breaks$fallBPWMean[is.na(breaks$fallBPWMean )] <- maxCompleteDOYBP3
+```
+
+```{r summer bp}
+
+#====================================================================================================================
+#Segmented regression of water temperature to get breakpoint between ascending and descending temps by year and site:
+# summerBP or BP 2
+# can get bad bp2 estimates when water temp increases very rapidly in the spring. as of 11/15/13, including the middle 90% of the datapts between bp1 and bp3 to trim the ends 
+#====================================================================================================================
+minCompleteDOYBP2 <- 180
+maxCompleteDOYBP2 <- 240
+numForCompleteBP2 <- round( ( maxCompleteDOYBP2-minCompleteDOYBP2 ) * 0.75 ) #changed from 0.9
+
+trimProp <- 0.05 # the proportion of obs btw bp1 and bp3 to trim for segmented
+
+segDF <- data.frame(site=NA,year=NA,dOY=NA,temp=NA,pred=NA)
+
+for (j in 1:nSites){
+  #  for (j in 1:10){
+  
+  curSite <- which(e$site == siteList[j])
+  e1 <- e[curSite,]
+  
+  #are data complete for a year?
+  
+  e3 <- e1[ e1$dOY >= minCompleteDOYBP2 & e1$dOY <= maxCompleteDOYBP2, ]
+  
+  if(nrow(e3) > 0) {
+    complete <- as.data.frame( table( e3$year,is.na( e3$temp ) ) )
+    incompleteYears <- as.numeric(as.character(complete$Var1[complete$Var2 == 'FALSE' & complete$Freq <  numForCompleteBP2]))
+    completeYears <-   as.numeric(as.character(complete$Var1[complete$Var2 == 'FALSE' & complete$Freq >= numForCompleteBP2]))
+  }
+  if(nrow(e3) == 0) completeYears <- NULL #skip the loops if no data
+    
+  for (year in completeYears){
+
+      print(c('BP2',j,as.character(siteList[j]),year))
+      
+      bp1 <- breaks$springBPWMean[breaks$site == siteList[j] & breaks$year == year ]
+      bp3 <- breaks$fallBPWMean[breaks$site == siteList[j] & breaks$year == year ]
+      
+      trim <- round((bp3-bp1) * trimProp)
+      minDOY <- bp1 + trim
+      maxDOY <- bp3 - trim
+      
+      if(exists('out')) rm(out) 
+      dat <- e1[e1$year == year & e1$dOY >= minDOY & e1$dOY <= maxDOY,]
+      tryCatch({out <- segmented( lm(temp~dOY, data=dat), 
+                                  seg.Z=~dOY, psi=list(dOY=c(200)))},error=function(e){cat("ERROR :",conditionMessage(e), "\n")})      
+      
+      if(exists('out')){
+        
+        # commented this out because it was in here before bp2 seg regression was done only between bp1 and bp3
+        #if ( summary(out)$coefficients[2] < 0 ){  
+        #  rm(out) #Delete segmented regression if slope of segment 1 is negative 
+        
+          # for making seg regression graphs in ggplot          
+          segDF <- rbind( segDF, cbind(site=siteList[j],year=year,dOY=dat$dOY,temp=dat$temp,pred=out$fitted.values) )
+          
+          #Add back in trimmed data - these are btw bp1 and bp3 but were not used in the seg regression for bp2
+          ## decided not to do this, makes the seg2 two graph misleading. ##
+#          datBeforeTrim <- e1[e1$year == year & e1$dOY >= bp1 & e1$dOY <= minDOY,]
+#          if(nrow(datBeforeTrim) > 0) segDF <- rbind( segDF, cbind(site=siteList[j],year=year,dOY=datBeforeTrim$dOY,temp=datBeforeTrim$temp,pred=NA) )
+          
+#          datAfterTrim <- e1[e1$year == year & e1$dOY <= bp3  & e1$dOY >= maxDOY,]
+#          if(nrow(datAfterTrim) > 0) segDF <- rbind( segDF, cbind(site=siteList[j],year=year,dOY=datAfterTrim$dOY,temp=datAfterTrim$temp,pred=NA) )
+        #}
+      }
+      png(filename=paste0(getwd(),"/figs/summerBP/summerBP_",e1$site[1],"_",year,".png"),width=1000, height=600, bg="white")
+      plot(e1$dOY[e1$year %in% year], e1$temp[e1$year %in% year],ylim=c(-5,25),xlim=c(0,366))
+      
+      if(exists("out")){
+        
+        breaks$summerBP[breaks$year == year & breaks$site == siteList[j]] <- summary(out)$psi[1,2]
+        breaks$summerBPComplete[breaks$year == year & breaks$site == siteList[j]]  <- TRUE
+        
+        plot(out,add=T,link=FALSE,lwd=2,col=2:3, lty=c(1),ylim=c(-5,25),xlim=c(0,366))
+        lines(out,col=2,pch=19,bottom=FALSE,lwd=2) 
+        
+      }
+      title(main=paste(e1$site[1],"_",year))
+      dev.off()
+      #
+  }
+
+}
+
+# for WB MS graphs
+if( fileSource == 'WB') segDF$site <- factor(segDF$site,levels=1:4, labels=c('WB JIMMY','WB MITCHELL','WB OBEAR','WEST BROOK'))
+
+# add in means for summer BP. used when  have a fall but no spring or summer BP and there are data in the spring
+meanBP2 <- ddply( breaks, .(site), summarise, meanSummerBP = mean(summerBP,na.rm=T) )
+breaks$meanSummerBP <- NULL # in case we've merged before
+
+breaks <- merge( x=breaks, y= meanBP2, all.x=T, by=c('site') )
+
+breaks$summerBPWMean <- ifelse( is.na(breaks$summerBP), breaks$meanSummerBP, breaks$summerBP )
+breaks$summerBPWMean <- ifelse( !is.finite(breaks$summerBPWMean), mean(breaks$meanSummerBP[is.finite(breaks$meanSummerBP)]), breaks$summerBPWMean )
+
+#----------------------------------------------------------------
+#Merge the breakpoints and quantiles with the existing dataframe:
+#----------------------------------------------------------------
+#et <- merge( x=e, y=breaks, by.x=c('year','site'),by.y=c('year','site'),all.x=T)
+et <- merge( x=e, y=breaks, by=c('year','site'),all.x=T)
+
+# need to sort for plotting pred
+segDF <- segDF[order(segDF$site,segDF$year,segDF$dOY),]
+```
+
+
+
+```{r set bps}
+
+################################################
+# set segment assignments based on which BPs
+# are estimated
+################################################
+
+et$segment <- NA
+
+################################################
+# Spring = YES  ||  Summer = YES || Fall = YES #
+################################################
+
+et$segment <- ifelse( et$springBPComplete & et$summerBPComplete & et$fallBPComplete, (
+  
+                ifelse( et$dOY <  et$springBP | et$dOY >= et$fallBP,   1,
+                ifelse( et$dOY >= et$springBP & et$dOY <  et$summerBP, 2,
+                ifelse( et$dOY >= et$summerBP & et$dOY <  et$fallBP,   3, et$segment ) ) ) ), et$segment )
+
+################################################
+# Spring = NO  ||  Summer = YES || Fall = YES #
+################################################
+
+et$segment <- ifelse( !et$springBPComplete & et$summerBPComplete & et$fallBPComplete, (
+  
+                ifelse( et$dOY >= et$fallBP,                           1,
+                ifelse( et$dOY <= et$summerBP &
+                        et$tempIndex > et$quantileLo & 
+                        et$tempIndex < et$quantileHi,                  2,
+                ifelse( et$dOY >= et$summerBP & et$dOY <  et$fallBP,   3, et$segment ) ) ) ), et$segment )
+
+################################################
+# Spring = YES  ||  Summer = YES || Fall = NO  #
+################################################
+
+et$segment <- ifelse( et$springBPComplete & et$summerBPComplete & !et$fallBPComplete, (
+  
+                ifelse( et$dOY <  et$springBP ,                        1,
+                ifelse( et$dOY >= et$springBP & et$dOY <  et$summerBP, 2,
+                ifelse( et$dOY >  et$summerBP &
+                        et$tempIndex > et$quantileLo & 
+                        et$tempIndex < et$quantileHi,                  3, et$segment ) ) ) ), et$segment )
+
+################################################
+# Spring = NO   ||  Summer = YES ||  Fall = NO #
+################################################
+
+et$segment <- ifelse( !et$springBPComplete & et$summerBPComplete & !et$fallBPComplete, (
+  
+                ifelse( et$dOY <= et$summerBP &
+                          et$tempIndex > et$quantileLo & 
+                          et$tempIndex < et$quantileHi,                2,
+                ifelse( et$dOY >  et$summerBP &
+                          et$tempIndex > et$quantileLo & 
+                          et$tempIndex < et$quantileHi,                3, et$segment ) ) ), et$segment )
+
+
+################################################
+# Spring = YES  ||  Summer = NO  || Fall = YES #
+################################################
+
+# use mean summer segment? Yes.
+et$segment <- ifelse( et$springBPComplete & !et$summerBPComplete & et$fallBPComplete, (
+  
+                ifelse( et$dOY <  et$springBP | et$dOY >= et$fallBP,        1,
+                ifelse( et$dOY >= et$springBP & et$dOY <  et$summerBPWMean, 2,
+                ifelse( et$dOY >= et$summerBPWMean & et$dOY <  et$fallBP,   3, et$segment ) ) ) ), et$segment )
+
+
+################################################
+# Spring = NO  ||  Summer = NO   || Fall = YES #
+################################################
+
+et$segment <- ifelse( !et$springBPComplete & !et$summerBPComplete & et$fallBPComplete, (
+  
+  ifelse( et$dOY >= et$fallBP,   1,
+  ifelse( et$dOY <  et$fallBP & et$dOY >= et$summerBPWMean,  3, et$segment ) ) ), et$segment )
+                               
+################################################
+# Spring = YES  ||  Summer = NO  || Fall = NO  #
+################################################
+
+et$segment <- ifelse( et$springBPComplete & !et$summerBPComplete & !et$fallBPComplete, (
+  
+  ifelse( et$dOY <  et$springBP,   1,
+  ifelse( et$dOY >  et$springBP & et$dOY <= et$summerBPWMean,   2, et$segment ) ) ), et$segment )
+
+################################################
+# Spring = NO   ||  Summer = NO  ||  Fall = NO #
+################################################
+
+# no segments can be assigned
+
+###########################################################################################################################
+
+# year segment includes early winter of the next year with the current year
+et$yearSegment <- et$year
+et$yearSegment <- ifelse( et$dOY > et$fallBP,et$yearSegment+1,et$yearSegment )
+
+# check order:
+et <- et[order(et$count),]
+
+```
+
+```{r do regression for temp ~ airTemp by site, year, segment}
+
+slopes <- ddply( et[!is.na(et$segment) & et$segment %in% 2:3,], .(year, site, segment), summarise, 
+            interceptSeg = lm(temp ~ airTemp)$coefficients[1],
+                slopeSeg = lm(temp ~ airTemp)$coefficients[2] )
+
+et$slopeSeg <- NULL; et$interceptSeg <- NULL # in case we've merged before
+et <- merge( x=et, y=slopes[!is.na(slopes$site),], by=c('year','site','segment'),all.x=T)
+et <- et[order(et$count),]
+
+et$slopeSegSlopeDiff <- et$slopeSeg - et$slope
+
+```
+
+
+```{r make graphs}
+###########################################################################################################################
+# Look at some results:
+###########################################################################################################################
+
+# Look at some results:
+#setwd('C:/Users/STUDENT/Documents/Stream Temp/Stream Temp Data/Breakpoint_Analysis')
+
+#load("Breakpoint_Data.Rdata")
+
+#Distribution of breakpoints:
+boxplot(et$springBP,et$summerBP,et$fallBP,names=c("Spring","Summer","Fall"))
+
+# Make graphs for each site
+#-------------------------
+if (makeSpringFallGraphs){
+for (j in 1:nSites){  
+  print(c('making graphs:',j, 'out of ',nSites))
+#i <- 36 # <- which site to view.
+
+  temp <- et[et$site == siteList[j] & !is.na(et$temp),]
+
+#png(filename=paste0("BP_Plot_Site_",temp$site[1],".png"),width=1000, height=400, bg="white")
+
+gBP <- ggplot( temp, aes(dOY,tempIndex)) +
+  geom_point(aes(dOY,movingSD), colour='red') +
+  geom_point(aes(dOY,movingMean), colour='blue') +
+  geom_point() +
+  geom_hline( aes(yintercept=as.numeric(quantileLo)), colour='black') +
+  geom_hline( aes(yintercept=as.numeric(quantileHi)), colour='black') +
+  geom_vline( aes(xintercept=as.numeric(springBP)), colour='green') +
+  geom_vline( aes(xintercept=as.numeric(fallBP)), colour='orange') +
+  geom_vline( aes(xintercept=as.numeric(summerBP)), colour='blue') +
+  ylim(c(-10,10))+
+ #  xlim(c(80,120))+
+  theme(strip.text.x = element_text(size=6))+
+  ggtitle(paste(temp$site[1],sep=" ")) +
+  facet_wrap(~year)
+
+
+#gSeg <- ggplot( temp, aes( airTemp,temp, color=factor(segmentWFill) ) ) +
+    
+gSeg <- ggplot( temp, aes( airTemp,temp, color=factor(segment) ) ) +
+  geom_point() +
+  geom_smooth(method='lm') +  
+  theme(legend.position="none") +
+  theme(strip.text.x = element_text(size=6))+
+#  scale_colour_brewer(palette="Set1") +
+#    scale_colour_hue()+
+#    scale_colour_manual(values = c('blue', "green",'red','grey')) +
+  facet_wrap(~year)
+
+  gOut <- arrangeGrob( gBP, gSeg, ncol=1 )
+
+  ggsave(plot=gOut,file=paste(getwd(),'/figs/springFallBP/',temp$site[1],".png",sep=''),dpi=300,width=6,height=8, units='in', scale=2)
+
+}
+} # if
+
+```
+
+```{r save e}
+
+save(e, file=paste('D:/GitHub/projects/temperatureProject/e',fileSource,'.RData',sep=''))
+
+save(et,segDF,slopes, file=paste('D:/GitHub/projects/temperatureProject/et',fileSource,'.RData',sep=''))
+
+#  load e when starting a new session and you don't want to run all the code
+# load(paste('D:/GitHub/projects/temperatureProject/e',fileSource,'.RData',sep=''))
+```
+
+
+
+
+
+
+
+
+
+
+#####################################################
+#####################################################
+# Read in environmental data
+#####################################################
+#####################################################
+setwd('D:/PITTAGMAIN/temperature modeling/fromKyle/')
+bd <- read.table("Basin_Chars_195.txt", header=TRUE)
+bd$site <- bd$Site
+bd$lat <- bd$Latitude
+bd$long <- bd$Longitude
+
+#############################
+# merge env data into breaks
+# create bp df that will hold intercepts and slopes for independent lms
+
+bp <- merge( x=breaks, y=bd, all.x=T, by='site')
+
+bp$springSummerDays <- bp$summerBP - bp$springBP
+bp$summerFallDays <- bp$fallBP - bp$summerBP
+bp$springFallDays <- bp$fallBP - bp$springBP
+
+###############################
+# get feature ID for each site based on lat/lon
+# Ana did this on her computer and sent the file
+setwd('D:/PITTAGMAIN/temperature modeling/fromKyle/')
+bdID <- read.csv("temp_gage_cat_id.csv", header=TRUE)
+bdID[,c('Data_File_')] <- NULL
+
+
+bp <- merge( x=bp, y=bdID, all.x=T, by='site')
+###################################################
+# run lm for each segment for each site/year combo
+###################################################
+et <- merge( x=et, y=bdID, all.x=T, by='site')
+
+# plot regressions
+et$modSite <- as.numeric(et$site) %% 14  # break site into groups for plotting
+ggplot( et[et$segment %in% 2:3,], aes(airTemp,temp, group=site) ) +
+  geom_smooth( aes( color=(latitude) ), method='lm', se=FALSE ) +
+  scale_x_continuous('Air temperature') +
+  scale_y_continuous('Water temperature') +
+ # theme(legend.position="none") +
+  facet_grid( ~segment  )
+# looks like slopes are very similar across sites
+
+
+# calculate regression parameters
+bp$slope2 <- NA
+bp$intercept2 <- NA
+bp$slope3 <- NA
+bp$intercept3 <- NA
+for ( s in 1:length(siteList) ){
+  for ( y in unique(et$year[et$site == siteList[s]]) ){
+    
+    #for ( seg in 2:3 ){
+    #segment 2  
+    lmData2 <- et[et$site == siteList[s] & et$year == y & et$segment == 2, ]
+    if((length(which(!is.na(lmData2$temp)==TRUE))>5) & (length(which(!is.na(lmData2$airTemp)==TRUE))>5)){
+      print(c(s,'siteList name',siteList[s],y,'seg2'))
+      out <- lm( temp ~ airTemp , data=lmData2 )
+      bp$intercept2[bp$site == siteList[s] & bp$year == y ] <- out$coefficients[1]
+          bp$slope2[bp$site == siteList[s] & bp$year == y ] <- out$coefficients[2]
+    } 
+    #segment 3
+    lmData3 <- et[et$site == siteList[s] & et$year == y & et$segment == 3, ]
+    if((length(which(!is.na(lmData3$temp)==TRUE))>5) & (length(which(!is.na(lmData3$airTemp)==TRUE))>5)){
+      print(c(s,'siteList name',siteList[s],y,'seg3'))
+      out <- lm( temp ~ airTemp , data=lmData3 )
+      bp$intercept3[bp$site == siteList[s] & bp$year == y ] <- out$coefficients[1]
+          bp$slope3[bp$site == siteList[s] & bp$year == y ] <- out$coefficients[2]
+    } 
+    
+    #}
+  }
+}
+
+
+##  save so all above does not need to be rerun when thnigs crash or you start again
+save(et,siteList,breaks,bp,bd,file="Breakpoint_Data.Rdata")
+#load(file="Breakpoint_Data.Rdata")
+
+} # reRunBP bracket
+
+##
+
+ggplot( bp, aes( intercept2 ) ) + geom_histogram()
+ggplot( bp, aes( slope2,intercept2, color=site ) ) + geom_point()
+ggplot( bp, aes( slope2,intercept2, color=BFI_P ) ) + geom_point()
+
+ggplot( bp, aes( intercept3 ) ) + geom_histogram()
+ggplot( bp, aes( slope3,intercept3, color=site ) ) + geom_point()
+ggplot( bp, aes( slope3,intercept3, color=P_Silt ) ) + geom_point()
+
+ggplot( bp, aes( Drainage_Area_Km2)) + geom_histogram()
+#library(GGally)
+# need to source ggpairs() from '' to accomodate NAs
+# doesn't interact with the geom_point function well
+ggpairs( bp[,c('Drainage_Area_Km2','Mean_Elevation_m','springBP','summerBP','fallBP','springSummerDays','summerFallDays','springFallDays','slope2','intercept2','slope3','intercept3')] )+geom_smooth(method='lm') #+ geom_point(data=bp,aes(color=site))
+
+pairs(bp[,c('Drainage_Area_Km2','Mean_Elevation_m','springBP','summerBP','fallBP','springSummerDays','summerFallDays','springFallDays','slope2','intercept2','slope3','intercept3')])
+###############################
+# make maps of bps and slopes
+
+#m <- map_data('county', region = c('mass','conn','vermont','new hampshire')) 
+m + ggplot() + geom_jitter( data=bp, aes( long,lat, color=(summerBP) ), shape=19,size=3 ) +
+  facet_wrap(~year)
+
+#p <- ggplot()  + geom_line(data=m,aes(x=long, y=lat, group=group))
+
+#ggplot( bp, aes( lat,long ) ) +
+#  geom_jitter( aes( size = springBP ) ) +
+#  geom_jitter( aes( size = summerBP ), color='red' ) +
+#  geom_point( aes( size = fallBP ), color='blue' ) + m
+
+
+#dist btw points
+# normalize by year and long-term prism air temp data
+# map by basin size
+
+map.center <- geocode("Petersham, MA")
+mMap <- qmap(c(lon=map.center$lon, lat=map.center$lat), 
+              source="osm",  zoom=8)
+
+
+
+
+
+
+mMap + geom_jitter( data=bp, aes( long,lat, color=(summerBP) ), shape=19,size=3 ) +
+  facet_wrap(~year)
+
+
+mMap + geom_point( data=bp, aes( long,lat, size=(slope2),color=(intercept2) ), position = position_jitter(w = 0.1, h = 0.1), shape=1 ) +
+  scale_colour_gradientn(colours = rainbow(10))
+
+mMap + geom_point( data=bp, aes( long,lat, size=(slope3),color=(intercept3) ), position = position_jitter(w = 0.1, h = 0.1), shape=1 ) +
+  scale_colour_gradientn(colours = rainbow(10)) +
+  geom_path(data=mdat,aes(x=map.center$lon,y=map.center$lat,group=region),colour="red",alpha=0.8)+
+  borders("county", colour="blue", alpha=0.5,region="massachusetts")
+
+# without the map background
+ne <- c("new hampshire",'vermont','massachusetts','connecticut','rhode island')
+
+byState <- map_data('state')
+neState <- subset(byState, region %in% ne)   #subset just for ne
+
+byCounty <- map_data('county')
+neCounty <- subset(byCounty, region %in% ne)   #subset just for ne
+
+ggplot() +  
+#  mMap +
+  geom_point( aes( long,lat 
+#                    ,size=springBP #2 #springBP #slope2
+#                    ,color=springBP #springBP #intercept2
+                   
+#                   ,size=summerBP #2 #springBP #slope2
+#                   ,color=summerBP #springBP #intercept2
+                   
+                   ,size=fallBP #2 #springBP #slope2
+                   ,color=fallBP #springBP #intercept2
+                   
+#                   ,size=springFallDays #2 #springBP #slope2
+#                   ,color=springFallDays #springBP #intercept2
+                   
+                   ), position = position_jitter(w = 0.06, h = 0.06), shape=1, data=bp ) +
+#  scale_colour_gradientn(colours = rainbow(10)) +
+  scale_colour_gradientn(colours=c("red", "blue"),na.value = "lightgrey") +
+  geom_polygon( aes(long, lat, group=group), colour='lightgrey', fill=NA, data=neCounty) +
+  geom_polygon( aes(long, lat, group=group), colour='black', fill=NA,size=1.05, data=neState) +
+#  stat_density2d(geom="tile", aes(long, lat,fill = fallBP), contour = FALSE, data=bp) +
+#  stat_contour( aes(x=long, y=lat,z= fallBP), data=bp) +
+  coord_map(ylim=c(41,43.5)) +
+  theme_bw(base_size=25)+theme(panel.grid.major = element_line(colour='white')) 
+
+#tried draping a 2d density over the map but couldn't get it to work
+
+
+
+#================================================================================================
+#                                 PRINCIPAL COMPONENT ANALYSIS
+#================================================================================================
+
+# bd is the invariant data dataset for each site
+p <- prcomp(bd[,12:37],scale=TRUE,center=TRUE)
+plot(p)
+biplot(p, cex.lab = 2, cex.axis=2)
+summary(p)
+loadings(p)
+scoresBD <- as.data.frame(scores(p)[,c(1:10)])
+scoresBD$site <- siteList
+
+# merge scores into et
+etWScores1 <- merge( x=et, y=scoresBD, all.x=T, by='site' )
+
+# add raw data back in 
+etWScores <- merge(x=etWScores1, y=bd, by='site')
+
+# simple model of slopes across space
+
+etWScores$tempS <- as.numeric(scale(etWScores$temp))
+etWScores$airTempS <- as.numeric(scale(etWScores$airTemp))
+
+#m1 <- lmer( tempS ~ airTempS + factor(segment) + PC1 + PC2 + PC3 + PC4 + 1|year, data=etWScores[etWScores$segment %in% 2:3,] )
+
+m1 <- lm( tempS ~ airTempS + factor(segment) + factor(year) + PC1 + PC2 + PC3 + PC4 , data=etWScores[etWScores$segment %in% 2:3 & etWScores$year %in% 2006:2010,] )
+m2 <- lm( tempS ~ airTempS * factor(segment) * factor(year) + PC1 + PC2 + PC3 + PC4 , data=etWScores[etWScores$segment %in% 2:3 & etWScores$year %in% 2006:2010,] )
+m3 <- lm( tempS ~ airTempS * factor(segment) * factor(year) + PC1*airTempS + PC2*airTempS + PC3*airTempS + PC4*airTempS , data=etWScores[etWScores$segment %in% 2:3 & etWScores$year %in% 2006:2010,] )
+
+m4 <- lm( tempS ~ airTempS * factor(segment) * factor(year) + PC1*airTempS + PC2*airTempS + PC3*airTempS + PC4*airTempS + PC5*airTempS + PC6*airTempS + PC7*airTempS + PC8*airTempS + PC9*airTempS + PC10*airTempS, data=etWScores[etWScores$segment %in% 2:3 & etWScores$year %in% 2006:2010,] )
+
+m5 <- lm( tempS ~ airTempS * factor(segment) * factor(year) + PC1*airTempS* factor(segment)  + PC2*airTempS* factor(segment)  + PC3*airTempS* factor(segment)  + PC4*airTempS* factor(segment) +
+                                                              PC5*airTempS* factor(segment)  + PC6*airTempS* factor(segment)  + PC7*airTempS* factor(segment)  + PC8*airTempS* factor(segment)  +
+                                                              PC9*airTempS* factor(segment) + PC10*airTempS* factor(segment) , data=etWScores[etWScores$segment %in% 2:3 & etWScores$year %in% 2006:2010,] )
+
+m6 <- lm( tempS ~ airTempS * factor(segment) * factor(year) + PC1*airTempS* factor(segment)* factor(year) + PC2*airTempS* factor(segment)* factor(year)  + PC3*airTempS* factor(segment)* factor(year)  + 
+                                                              PC4*airTempS* factor(segment)* factor(year) + PC5*airTempS* factor(segment)* factor(year)  + PC6*airTempS* factor(segment)* factor(year)  +
+                                                              PC7*airTempS* factor(segment)* factor(year) + PC8*airTempS* factor(segment)* factor(year)  + PC9*airTempS* factor(segment)* factor(year) +
+                                                             PC10*airTempS* factor(segment)* factor(year) , data=etWScores[etWScores$segment %in% 2:3 & etWScores$year %in% 2006:2010,] )
+
+m7 <- lm( tempS ~ airTempS * factor(segment) * factor(year) + PC1*airTempS* factor(segment)* factor(year) + PC2*airTempS* factor(segment)* factor(year)  + PC3*airTempS* factor(segment)* factor(year)  + 
+                                                              PC4*airTempS* factor(segment)* factor(year) + PC5*airTempS* factor(segment)* factor(year)  + PC6*airTempS* factor(segment)* factor(year)  +
+                                                              PC7*airTempS* factor(segment)* factor(year) + PC8*airTempS* factor(segment)* factor(year)  + PC9*airTempS* factor(segment)* factor(year) +
+                                                             PC10*airTempS* factor(segment)* factor(year) + rain, data=etWScores[etWScores$segment %in% 2:3 & etWScores$year %in% 2006:2010,] )
+AIC(m1,m2,m3,m4,m5,m6,m7)
+
+d <- expand.grid( airTempS = seq(-2,2,0.5), year = 2006:2010, segment=2:3, PC1 = seq(-5,5,1), PC2 = seq(-4,6,2), PC3 = seq(-3,2,1), 
+                                                                           PC4 = 0, PC5 = 0, PC6 = 0, 
+                                                                           PC7 = 0, PC8 = 0, PC9 = 0, PC10 = 0,
+                                                                           rain = c(1,25) )
+d$pred <- predict(m7,d)
+d$rainSegment <- paste(d$rain,d$segment,sep='_')
+
+# shows yearly diffs in segments
+ggplot( d, aes(airTempS,pred)) +
+  geom_point( aes(color=factor(rainSegment))) +
+  facet_wrap(~year)
+
+# shows effects of PCs 
+ggplot( d, aes(airTempS,pred,color=factor(PC3))) +
+  geom_point( ) +
+  geom_smooth(method='lm',se=F) +
+  facet_grid(segment~year)
+
+#try raw input data instead of PCs to maybe get a better feel for effects
+etWScores$BFI_PS <- as.numeric(scale(etWScores$BFI_P))
+etWScores$Mean_Elevation_mS <- as.numeric(scale(etWScores$Mean_Elevation_m))
+etWScores$Drainage_Area_Km2S <- as.numeric(scale(etWScores$Drainage_Area_Km2))
+etWScores$P_SandS <- as.numeric(scale(etWScores$P_Sand))
+
+pairs(bp[,c('BFI_P','Drainage_Area_Km2','Mean_Elevation_m','P_Sand')])
+mm1 <- lm( tempS ~ airTempS * factor(segment) * factor(year) + BFI_PS +Drainage_Area_Km2S + P_SandS , data=etWScores[etWScores$segment %in% 2:3 & etWScores$year %in% 2006:2010,] )
+mm2 <- lm( tempS ~ airTempS * factor(segment) * factor(year) + 
+             BFI_PS*airTempS * factor(segment) * factor(year) +
+ Drainage_Area_Km2S*airTempS * factor(segment) * factor(year) +
+            P_SandS*airTempS * factor(segment) * factor(year) , data=etWScores[etWScores$segment %in% 2:3 & etWScores$year %in% 2006:2010,] )
+
+AIC(mm1,mm2)
+
+dd <- expand.grid( airTempS = seq(-2,2,1), year = 2006:2010, segment=2:3, 
+                   BFI_PS = seq(-2,2,1), 
+                   Drainage_Area_Km2S = seq(-2,2,1), 
+                   P_SandS = seq(-2,2,1) )
+dd$pred <- predict(mm2,dd)
+
+# shows effects of Vars 
+ggplot( dd, aes(airTempS,pred
+ # ,color=factor(
+ # BFI_PS
+#  Drainage_Area_Km2S
+#  P_SandS
+#  )
+  )) +
+  geom_point( ) +
+  geom_smooth(method='lm',se=F) +
+  scale_y_continuous('Stream temperature')+
+  scale_x_continuous('Air temperature')+
+  theme(base_size=15) +
+  facet_grid(segment~year)
+
+
+
+
+
+
+
+
+# try random effct on year - not enough memory...
+m5re <- lmer( temp ~ airTemp * factor(segment) * factor(year) + PC1*airTemp* factor(segment)  + PC2*airTemp* factor(segment)  + PC3*airTemp* factor(segment)  + PC4*airTemp* factor(segment) +
+                                                              PC5*airTemp* factor(segment)  + PC6*airTemp* factor(segment)  + PC7*airTemp* factor(segment)  + PC8*airTemp* factor(segment)  +
+                                                              PC9*airTemp * factor(segment) + PC10*airTemp* factor(segment) + 1|year, data=etWScores[etWScores$segment %in% 2:3 & etWScores$year %in% 2006:2010,] )
+
+ 
+ #
+ 
+ 
+
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+
+ 
+ 
+ 
+#                                                           END KO and NEW BHL Stuff
+#####################################################################################################################################
+#####################################################################################################################################
+#####################################################################################################################################  
+#####################################################################################################################################
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+##############
+# graphs for checking lm and breakpoints
+
+ggplot( e[e$year  %in% year ,], aes(dOY,tempIndex)) +
+  geom_point( aes(dOY,lmOut[dOY,3]), colour='red' ) +
+  geom_line( aes(dOY,lmOut[dOY,3]), colour='red' ) +
+  geom_point( aes(dOY,lmOut[dOY,4]), colour='green' ) +
+ # geom_point( aes(dOY,lmOut[dOY,4]), colour='blue' ) +
+  geom_point( aes(dOY,lmOut[dOY,8]), colour='orange' ) +
+  geom_point( aes(dOY,lmOut[dOY,9]), colour='blue' ) +
+  geom_point() +
+  geom_line()+
+  geom_hline( yintercept=slopeQ[1], colour='green') +
+  geom_hline( yintercept=slopeQ[3], colour='green') +
+  geom_hline( yintercept=diffQ[3], colour='blue') +
+  geom_hline( yintercept=diffQ[1], colour='blue') +
+  geom_hline( yintercept=TIQ[3], colour='black') +
+  geom_hline( yintercept=TIQ[1], colour='black') +
+  geom_vline( xintercept=firstBP, colour='blue') +
+  geom_vline( xintercept=lastBP, colour='blue') +
+  ylim(c(-10,10))+
+ # xlim(c(80,220))+
+  ggtitle(paste(year,window,winFactor,sep=" "))
+
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+#############
+# try strucchange. doesn't connect regression lines
+#this doesn't seem to line up with visual inspection
+
+year=2004
+holdData <- ts(e[e$year == year,'movingSD'], start=1, end=366)
+hold <- breakpoints( holdData ~ 1 )
+bp <- data.frame(breakpoints(hold)[1] )
+
+#ggplot( e[e$year  %in% year ,], aes(dOY,tempIndex)) +
+ggplot( e[e$year  %in% year ,], aes(dOY,movingSD)) +
+  geom_point() +
+  geom_vline( aes( xintercept =  breakpoints  ),bp)
+#
+
+
+# loop over years
+breaksSD <- data.frame(array(NA,c(20,3)))
+i=0
+for (year in c(1998:1999,2001:2007,2010)){
+  i=i+1
+  print(c(i,year))
+  out <- segmented( lm(tempIndex~dOY, data=e[e$year == year,]), seg.Z=~dOY, psi=list(dOY=c(100,200)))
+  # out <- segmented( lm(movingSD~dOY, data=e[e$year == year,]), seg.Z=~dOY, psi=list(dOY=c(100,200)))
+  
+  breaksSD[i,1] <- year
+  breaksSD[i,2] <- summary(out)$psi[1,2]
+  breaksSD[i,3] <- summary(out)$psi[2,2]
+}
+
+
+##################################################################
+
+#################################################################
+# segmented regression to find break points for waterTemp for winter, ascending, and descending across all years
+# NOT USED
+segE <- segmented( lm(temp~dOY, data=e[e$year %in% c(1998:2007,2010),]), seg.Z=~dOY, psi=list(dOY=c(100,200)))
+
+plot(segE)
+points(e$dOY,e$temp)
+slope(segE)
+
+break1E <- summary(segE)$psi[1,2]
+break2E <- summary(segE)$psi[2,2]
+
+e$segE <- ifelse( e$dOY < break1E,1,
+                  ifelse( e$dOY < break2E,2,3 ))
+###########################################################################################################
+# by year
+breaks <- data.frame(array(NA,c(20,3)))
+i=0
+for (year in c(1998:2007,2010)){
+  i=i+1
+  out <- segmented( lm(temp~dOY, data=e[e$year == year,]), seg.Z=~dOY, psi=list(dOY=c(100,200)))
+  # out <- segmented( lm(movingSD~dOY, data=e[e$year == year,]), seg.Z=~dOY, psi=list(dOY=c(100,200)))
+  
+  breaks[i,1] <- year
+  breaks[i,2] <- summary(out)$psi[1,2]
+  breaks[i,3] <- summary(out)$psi[2,2]
+}
+# 'b2 is the break between the ascending and descending limbs
+names(breaks) <- c('year','b1','b2')
+
+e <- merge( x=e, y=breaks, by='year',all.x=T)
+# just to make sure the merge doens't skrew up order
+e <- e[order(e$date),]
+
+
+e$segByYear <- ifelse( e$dOY < e$b1,1,
+                       ifelse( e$dOY < e$b2,2,3 ))
+
+ggplot(breaks, aes(year,b1)) +
+  geom_point()+
+  geom_point(aes(year,b2))
+
+############################
+# plot raw data
+ggplot( e, aes(dOY,temp))+
+  geom_point() +
+  #geom_point( aes(dOY,airTemp), colour='red') +
+  geom_point( aes(dOY,airTemp), colour='red') +
+  facet_wrap(~year)
+
+ggplot( e[e$year  %in% c(1998:2007,2010) ,], aes(dOY,temp/airTemp))+
+  geom_point() +
+  geom_line() +
+  ylim(c(0,2)) +
+  facet_wrap(~year)
+
+ggplot( e, aes(studyDay,tempIndex,colour=factor(year)))+
+  geom_point() +
+  geom_line() +
+  geom_line( aes( studyDay,movingMean ),colour='black')+
+  geom_line( aes( studyDay,movingSD ),colour='blue')+
+  ylim(c(-2,15)) +
+  xlim(c(0,1000))
+ 
+ggplot( e[e$year<2011,], aes(dOY,tempIndex,colour=factor(year)))+
+ # geom_point() +
+#  geom_line() +
+ # geom_line( aes( dOY,movingMean ),colour='red')+
+  geom_line( aes( dOY,movingSD ),colour='blue')+
+  ylim(c(-2,50)) +
+#  xlim(c(1500,2500)) +
+#  xlim(c(0,4100)) +
+  facet_wrap(~year)
+ # scale_y_log10()
+
+eTemp <- e[e$year %in% 2000:2001,]
+eT <- eTemp$temp/eTemp$airTemp
+eTS <- ts(data=eT)
+bp <- breakpoints(eTS~1,breaks=10)
+
+ggplot( e, aes(airTemp,temp) ) +
+  geom_point() +
+  facet_wrap(~year)
+
+ggplot( e[e$year<2011,], aes(airTemp,temp, colour=factor(season)) ) +
+  geom_point(  )+
+  geom_smooth()+
+  facet_wrap(~year)
+
+ggplot( e[e$year<2011,], aes(airTemp,temp, colour=factor(segE)) ) +
+  geom_point(  )+
+  geom_smooth(method='lm')+
+  facet_wrap(~year)
+
+ggplot( e[e$year<2011,], aes(airTemp,temp, colour=factor(segByYear)) ) +
+  geom_point(  )+
+  geom_smooth(method='lm')+
+  facet_wrap(~year)
+
+ggplot( e[e$year<2011,], aes(tAirMax,temp, colour=factor(segE)) ) +
+  geom_point(  )+
+  geom_smooth(method='lm')+
+  facet_wrap(~year)
+
+ggplot( e[e$year<2011,], aes(dOY,temp))+#, colour=factor(season)) ) +
+  geom_point(  )+
+  geom_smooth(method='gam', formula= y ~ s( x, bs = "cc", k=15 ))+
+  facet_wrap(~year)
+########################################################################
+# linear models by segByYear
+
+# run lin mod with gls so we can compare other gls models
+e1 <- gls( temp ~  airTemp, data=e )
+e2 <- gls( temp ~  airTemp * factor(segByYear) * factor(year), na.action='na.exclude',data=e[e$year %in% c(1998:2007,2010),] )
+
+acf(resid(e2))
+AIC(ee1,ee2)
+#plot(ee2)
+
+ggplot( e[e$year  %in% c(1998:2007,2010) ,], aes(airTemp,temp, colour=factor(segByYear))) +
+  geom_point() +
+#  geom_line( aes(airTemp,predict(e2)) ) +
+  facet_grid(year~seg)
+
+########################################################################
+#start with just one year
+ee <- e[e$year==2003,]
+
+# try segmented regression to identify breakpoints for winter, increasing, decreasing temps
+lmEE <- lm(temp~dOY,data=ee)
+summary(lmEE)
+
+seg <- segmented( lmEE, seg.Z=~dOY, psi=list(dOY=c(100,200)))
+plot(seg)
+points(ee$dOY,ee$temp)
+slope(seg)
+
+break1 <- summary(seg)$psi[1,2]
+break2 <- summary(seg)$psi[2,2]
+
+ee$seg <- ifelse( ee$dOY < break1,1,
+                  ifelse( ee$dOY < break2,2,3 ))
+
+ee <- cbind(ee, ddply( ee, .(seg),summarize, tempScaled=scale(temp),airTempScaled=scale(airTemp))[,c(2,3)] )
+
+##########################
+
+
+ggplot( ee, aes(dOY,temp, colour=factor(season)))+
+  geom_point()
+
+ggplot( ee, aes(airTemp,temp, colour=(dOY)) ) +
+  geom_point(  )+  
+  geom_smooth()+
+  facet_wrap(~season)
+
+ggplot( ee, aes(airTemp,temp, colour=factor(season)) ) +
+  geom_point(  )+
+  geom_smooth()
+
+
+ggplot( ee, aes(dOY,temp, colour=(dOY)) ) +
+  geom_point(  )+
+  geom_line(  )+
+  geom_smooth()+
+  geom_point( aes(dOY,airTemp), colour='red') +geom_line( aes(dOY,airTemp), colour='red') +
+  facet_wrap(~season)
+
+ggplot( ee, aes(dOY,temp-airTemp, colour=(dOY)) ) +
+  geom_point(  )+
+  geom_line(  )+
+  geom_smooth() +
+  ylim(c(-5,5)) +
+  #geom_point( aes(dOY,airTemp), colour='red') +geom_line( aes(dOY,airTemp), colour='red') +
+  #facet_wrap(~season)
+
+ggplot( ee, aes(airTemp,temp, colour=factor(seg)) ) +
+  geom_point()+
+  geom_smooth(method='lm')
+
+ggplot( ee, aes(airTempScaled,tempScaled, colour=factor(seg)) ) +
+  geom_point()+
+  geom_smooth(method='lm')+
+  facet_wrap(~seg)
+
+##############################################################################
+# model for each seg, with and without temporal autocorrelation
+ee0 <- lm( temp ~  airTemp * factor(seg), data=ee )
+plot(ee1)
+
+ggplot( ee, aes(airTemp,temp, colour=factor(seg))) +
+  geom_point() +
+  geom_line( aes(airTemp,predict(ee1)) ) +
+  facet_wrap(~seg)
+
+# run lin mod with gls so we can compare other gls models
+ee1 <- gls( temp ~  airTemp, data=ee )
+ee2 <- gls( temp ~  airTemp * factor(seg), data=ee )
+
+acf(resid(ee2))
+AIC(ee1,ee2)
+#plot(ee2)
+
+ggplot( ee, aes(airTemp,temp, colour=factor(seg))) +
+  geom_point() +
+  geom_line( aes(airTemp,predict(ee2)) ) +
+  facet_wrap(~seg)
+
+## add temporal autocorrelation
+ee3 <- gls( temp ~  airTemp * factor(seg), correlation = corAR1(form=~dOY), data=ee)
+
+ggplot( ee, aes(airTemp,temp, colour=(dOY))) +
+  geom_point() +
+  geom_line( aes(airTemp,predict(ee3)) ) +
+  scale_colour_gradient(limits=c(0, 365), high='green',low="red")+
+  facet_wrap(~seg)
+
+acf(resid(ee3))
+
+AIC(ee1,ee2,ee3)
+
+
+
+
+pData <- cbind(min(ee$dOY):max(ee$dOY),predict(ee_3))
+names(pData) <- c('dOY','t')
+
+ggplot( ee, aes(dOY,tempScaled))+
+  geom_point()+
+  geom_point( aes(dOY,t),data=pData)
+
+
+###################################
+# just season 2
+ee3 <- ee[ee$season == 2, ]
+
+pairs(ee3[,c('dOY','temp','airTemp','tAirMax','tAirMin','flow','rain','precip','residT','residA')])
+
+ggplot( ee3, aes(dOY,temp, colour=(dOY)) ) +
+  geom_point(  )+
+  geom_smooth()+
+  geom_point( aes(dOY,airTemp), colour='red')
+
+ggplot( ee3, aes(dOY,temp) ) +
+  geom_point(  )+ geom_line( aes(dOY,temp)) +
+  geom_point( aes(dOY,airTemp), colour='darkgreen') + geom_line( aes(dOY,airTemp), colour='darkgreen') +
+  #geom_smooth()+
+  geom_point( aes(dOY,tAirMax), colour='red') + geom_line( aes(dOY,tAirMax), colour='red') +
+  geom_point( aes(dOY,tAirMin), colour='blue') +geom_line( aes(dOY,tAirMin), colour='blue')
+
+
+ee3_1 <- lm( temp~airTemp, data=ee3)
+plot(ee3_1)
+
+ee3_2 <- gls( temp ~ airTemp, data=ee3)
+plot(ee3_2)
+
+ee3_3 <- gls( temp ~ airTemp, correlation = corAR1(form=~dOY), data=ee3)
+points(ee3_3)
+plot(ee3$temp, col='red')
+
+pData <- cbind(min(ee3$dOY):max(ee3$dOY),predict(ee3_3))
+names(pData) <- c('dOY','t')
+
+ggplot( ee3, aes(dOY,temp))+
+  geom_point()+
+geom_point( aes(dOY,t),data=pData)
+
+
+acf(ee3_3)
+####################################
+
+win.graph(); par(mfrow=c(1,1));
+
+ggplot( ee, aes(dOY,temp))+
+  geom_point() +
+  geom_smooth(method='gam',formula=y ~ s(x, bs='cr', k=52))
+
+ggplot( ee, aes(dOY,airTemp))+
+  geom_point() +
+  geom_smooth(method='gam',formula=y ~ s(x, bs='cr', k=52))
+
+#  geom_point( aes(dOY,airTemp), colour='red') +
+#geom_smooth(colour='red')
+  
+
+
+# simple gam with just day of Year
+m1 <- gam( temp ~ s(dOY, bs='cr', k=15)
+           , data=ee) 
+gam.check(m1)
+plot(m1, residuals=T)
+acf(residuals(m1)) # strong pattern
+
+# turn away from gam for now, try a sin/cos with autocorrelation
+m2 <- lm(temp ~ cos(0.0172*dOY)+sin(0.0172*dOY), ,method="ML", data = ee )
+plot(fitted(m2))
+acf(resid(m2))
+
+ggplot( ee, aes(dOY,temp)) +
+  geom_point()+
+  geom_point(aes(dOY,fitted(m2)))
+# works well for some years, but not well for others (e.g. 2001)
+
+
+# add in correlation
+m3 <- gls(temp ~ cos(0.0172*dOY)+sin(0.0172*dOY),correlation=corAR1(form=~dOY) , data = ee )
+plot(fitted(m3))
+acf(resid(m3)) 
+#still have strong autocorr
+
+# autocorr of raw data - very high, as expected
+acf(ee$temp)
+
+
+
+
+# drop sin/cos, need to stick with spline
+# add in correlation
+m4 <- gls(temp ~ dOY,correlation=corAR1(form=~dOY) , data = ee )
+plot(fitted(m4))
+acf(resid(m4)) 
+#still have strong autocorr
+    
+# 
+
+
+m2 <- gamm( temp ~ s(dOY, bs='cr', k=15),
+            correlation=corAR1(form = ~ 1 ),
+            data=ee) 
+acf(residuals(m2)) # strong pattern
+
+
+
+
+
+#############################################
+# spline across years
+# didn't finish the function...
+getSpline <- function( x,y,name, ... ){
+  g <- gam( y ~ s( x, bs = "cc", k=15 ), data=e )
+  j <- data.frame(dOY=1:366)
+  p <- predict(g,j, type = "response")
+  pred <- cbind(j,as.numeric(p))
+  names(pred) <- c('dOY',name)
+  return(pred)
+}
+
+predSpline <- getSpline( e$dOY, e$temp, 'temp', data=e )
+
+gAir <- gam( airTemp  ~ s(dOY, bs = "cc", k=15), data=e )
+
+p <- predict(g,j, type = "response")
+pAir <- predict(gAir,j, type = "response")
+
+
+e <- merge( x=e, y=predT, all.x=T )
+e <- e[ order(e$date), ]
+
+e$residT <- e$temp - e$splineT
+e$residA <- e$airTemp - e$splineA
+
+

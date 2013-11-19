@@ -1,0 +1,830 @@
+Modeling stream temperature in the WB as a function of air temparature 
+========================================================
+
+```{r set opts}
+# this won't run when hit 'run all' chunks. Set to FALSE when using knitr
+runInRStudio <- FALSE
+if(!runInRStudio) opts_chunk$set( warning=FALSE,message=FALSE,fig.width=8, fig.height=5, comment=NA )
+```
+
+```{r figure options}
+msWD <- 'D:/BEN/Manuscripts/2013-stream temp modeling/figures'
+dpiIn <- 200     # change to match journal requirements
+plotFigs <- T
+gBaseSize <- 10
+```
+
+```{r load libraries}
+library(ggplot2)
+library(GGally)
+library(gridExtra)
+library(reshape2)
+library(mgcv)
+library(nlme)
+library(plyr)
+library(segmented)
+library(zoo)
+library(strucchange)
+library(lme4)
+```
+
+## Load data and do some basic data manipulation
+```{r read in fish data}
+setwd('d:/PITTAGMAIN/CMR Analyses/Hierach_Bugs/allSpp')
+
+e1 <- read.csv('envData.txt',header=T)
+e <- e1[ e1$River %in% c( 'WEST BROOK','WB OBEAR','WB JIMMY','WB MITCHELL' ), ]
+
+e$date <- as.POSIXct(strptime(e$Date, format = "%m/%d/%Y"))
+names(e) <- c('drainage','river','Date','waterTemp','flow','rain','date')
+e$drainage <- factor(e$drainage)
+e$river <- factor(e$river)
+e$dOY <- as.numeric(strftime(e$date, '%j'))
+e$year <- as.numeric(strftime(e$date, '%Y'))
+#e$studyDay <- 1:nrow(e) #doesn't work like this with multiple rivers
+e$rain0 <- ifelse(is.na(e$rain),0,e$rain)
+
+e$season <- ifelse( e$dOY<80,1,
+                    ifelse( e$dOY<172,2,
+                            ifelse( e$dOY<264,3, 
+                                    ifelse( e$dOY<355,4,1  ))))
+e$season <- ifelse( e$dOY>355,1,e$season )  
+```
+
+Read in Mauer data for the WB lat-lon 
+```{r read in Mauer data}
+setwd('d:/PITTAGMAIN/temperature modeling')
+m1 <- read.csv('met_data_42.4375_-72.6875.csv',header=T)
+m <- m1[m1$year > 1996,]
+
+m$tAirMin <- m$tmin; m$tAirMax <- m$tmax
+m$airTemp <- (m$tAirMin + m$tAirMax)/2
+m$date <- as.POSIXct(strptime(m$Date, format = "%d-%m-%Y"))
+```
+Read in daymet data for WB lat-lon
+```{r}
+dm1 <-  read.csv('daymet_westbrook.csv',header=T)
+dm <- dm1[dm1$year > 1996,]
+
+dm$tAirMin <- dm$tAirMinDM <- dm$tmin; dm$tAirMax <- dm$tAirMaxDM <- dm$tmax
+dm$airTemp <- dm$airTempDM <- (dm$tAirMinDM+dm$tAirMaxDM)/2
+
+dm$date <- as.POSIXct(strptime(paste(dm$year, dm$yday), format="%Y %j")) 
+dm$dOY <- dm$yday
+```
+## Mauer or dayMet?
+Do a quick comparison to decide whether to use Mauer or daymet data  
+  daymet is a little warmer than Mauer, but this is very consistent.  
+  Stick with daymet for now - seems more updateable
+```{r}
+mBoth <- merge( x=m, y=dm[,c('date','airTempDM','tAirMinDM','tAirMaxDM')], all.x=T)
+
+ggplot( mBoth, aes(airTemp,airTempDM))+
+  geom_point()+
+  geom_abline(slope=1)+
+  facet_wrap(~year)
+```
+merge dayMet into e
+```{r}
+e <- merge(x=e,y=dm[,c('date','tAirMax','tAirMin','airTemp','prcp','dayl')], by='date', all.x=T)
+# just to make sure the merge doens't screw up order
+e <- e[order(e$date),]
+```
+## The problem with current approaches
+Non-linear curve for a full year of water temperature-air temprature data is a poor fit
+because water and air temperature become desynchronized in winter. Also ascending and descending temperature
+limbs sometimes have different patterns
+```{r Mohensi}
+gMos <- ggplot(e[e$year==1999 & e$river=='WEST BROOK',], aes(airTemp,waterTemp))+
+  geom_point() +
+  geom_smooth( method = 'nls', formula = y ~ m + ((a-m)/(1+exp(g*(b-x)))), se = F, start = list(a = 40,m = 0, g=1/15, b=10), size=1.25, colour='black') +
+  theme_bw(base_size=10) +
+  scale_x_continuous(expression(paste("Air temperature (",degree, "C)", sep = "")))+ 
+  scale_y_continuous(expression(paste("Water temperature (",degree, "C)", sep = "")))
+
+ggsave( file=paste(msWD,'/mohseni.png',sep=''), plot=gMos, dpi=dpiIn , width=8,height=5, units='in',scale=2 )
+```
+
+
+## Fill in missing data for WB
+Some days are missing for the WB data. Develop a simple predictive model to fill in missing data based on relationships
+between trib and WB temperatures
+```{r}
+
+#look at raw data first
+ggplot( e, aes(dOY,waterTemp) )+
+  geom_point()+
+  facet_grid(river~year)
+
+#get data in wide format so we can plot rivers against each other
+eWide <- dcast( e[,c('date','waterTemp','river','year','dOY')], dOY+year+date~river, value.var='waterTemp' )
+names(eWide) <- c('dOY','year','date','WBJIMMY','WBMITCHELL','WBOBEAR','WESTBROOK')
+
+#merge in airTemp and flow
+eWide <- merge( x=eWide, y=e[ e$river == 'WEST BROOK',c('date','airTemp','flow'), ],all.x=T)
+
+#pairwise river graphs of temperature
+ggplot( eWide[eWide$year %in% 2002:2010,], aes(WBMITCHELL,WBJIMMY) )+
+  geom_point( aes(color=dOY) )+
+  geom_abline(slope=1)+
+  #geom_smooth(method='lm')+
+  facet_wrap(~year)
+#pairwise river graphs of temperature
+ggplot( eWide[eWide$year %in% 2002:2010,], aes(WESTBROOK,WBJIMMY) )+
+  geom_point( aes(color=dOY) )+
+  geom_abline(slope=1)+
+  #geom_smooth(method='lm')+
+  facet_wrap(~year)
+
+#pairs(eWide)
+#ggpairs(eWide, columns=4:7, diag=list(continuous="density", discrete="bar"), axisLabels="show") 
+
+#  lm() models for predicting WB temps from trib temps
+m3a <- lm( WESTBROOK ~ WBJIMMY , data=eWide )  
+m3b <- lm( WESTBROOK ~ WBJIMMY + factor(year), data=eWide )  
+m3c <- lm( WESTBROOK ~ WBJIMMY * factor(year), data=eWide )
+m3d <- lm( WESTBROOK ~ WBJIMMY * factor(year) + flow, data=eWide )
+m3e <- lm( WESTBROOK ~ WBJIMMY * factor(year) * flow , data=eWide )
+m3f <- lm( WESTBROOK ~ WBJIMMY * factor(year) * flow + airTemp, data=eWide )
+m3g <- lm( WESTBROOK ~ WBJIMMY * factor(year) * flow * airTemp, data=eWide )
+
+AIC(m3a,m3b,m3c,m3d,m3e,m3f,m3g) #m3g is by far the best
+
+#try other streams besides JIMMY
+m4g <- lm( WESTBROOK ~ WBMITCHELL * factor(year) * flow*airTemp, data=eWide )
+m5g <- lm( WESTBROOK ~ WBOBEAR * factor(year) * flow*airTemp, data=eWide )
+#r^2s, OBear=0.9863, Mitchell=0.988, Jimmy=0.989, go with Jimmy for predictions
+
+# get dates where wb temp=NA and we have trib data 2002-2013
+predictListWB <- eWide[is.na(eWide$WESTBROOK) & eWide$year>2002 & eWide$year<2013,c('date','WBJIMMY','year','flow','airTemp')]
+predictedWaterTempWB <- predict(m3g,predictListWB)
+preds <- cbind(predictListWB,predictedWaterTempWB)
+preds$river='WEST BROOK'
+e <- merge( x=e, y=preds[,c('river','date','predictedWaterTempWB')], all.x=T)
+
+# waterTempWPred is WB water temps with predicted temps filled in when WB temp=NA
+e$waterTempWPred <- ifelse( !is.na(e$predictedWaterTempWB),e$predictedWaterTempWB,e$waterTemp )
+
+#scale flow
+e$flowScaled <- scale(e$flow)
+
+#check WB temps with predicted
+ggplot( e, aes(dOY,waterTempWPred) )+
+  geom_point()+
+  geom_point(aes(dOY,waterTemp), color='red') +
+  facet_grid(river~year)
+
+ggplot( e[e$year==2000,], aes(dOY,waterTempWPred) )+
+  geom_point() +
+  geom_line() +
+  geom_point(aes(dOY,airTemp), color='red') +
+  geom_line(aes(dOY,airTemp), color='red') +
+  facet_grid(river~year)
+```
+
+Are data complete for a year? after including predicted data
+```{r check complete}
+complete <- as.data.frame(table( e$year,e$river,is.na(e$waterTempWPred)))
+incompleteYears <- data.frame(complete[complete$Var3 == 'FALSE' & complete$Freq<365, c('Var1','Var2')])
+names(incompleteYears) <- c('year','river')
+
+completeYears <- data.frame(complete[complete$Var3 == 'FALSE' & complete$Freq>=365, c('Var1','Var2')])
+names(completeYears) <- c('year','river')
+```
+Limit e to West Brook
+```{r subset e for river}
+# will need to make code more flexible to do analysis for each river
+river <- 'WEST BROOK'
+river <- 'WB OBEAR'
+e <- e[e$river == river,]
+```
+
+# Look at raw data plot of air and water temperature
+```{r raw data plots,fig.width=10, fig.height=8}
+
+gRaw <- ggplot( e[e$year < 2012 ,], aes(dOY,waterTempWPred))+
+  geom_point(size=0.5) +
+  geom_point( aes(dOY,airTemp), colour='red', size=0.5) +
+  theme_bw(base_size=gBaseSize) +
+#  theme(panel.grid.major = element_blank(),
+#        panel.grid.minor = element_blank())+
+  scale_y_continuous(expression(paste("Water temperature (",degree, "C)", sep = "")))+ 
+  scale_x_continuous('Day of year')+#, limit=c(0,40)) +
+  facet_wrap(~year); if(plotFigs) gRaw
+
+ggsave( file=paste(msWD,'/rawAirWaterTemps.png',sep=''), plot=gRaw, dpi=dpiIn , width=8,height=5, units='in' )
+
+gMosYearly <- ggplot( e[e$year < 2012 ,], aes(airTemp,waterTempWPred))+
+  geom_point() +
+  geom_smooth( method = 'nls', formula = y ~ m + ((a-m)/(1+exp(g*(b-x)))), se = F, start = list(a = 40,m = 0, g=1/15, b=10), size=1.25, colour='black') +
+  theme_bw(base_size=10) +
+  scale_x_continuous(expression(paste("Air temperature (",degree, "C)", sep = "")))+ 
+  scale_y_continuous(expression(paste("Water temperature (",degree, "C)", sep = ""))) +
+  facet_wrap( ~ year)
+
+ggsave( file=paste(msWD,'/mohseniYearly.png',sep=''), plot=gMosYearly, dpi=dpiIn , width=8,height=5, units='in' )
+
+
+```
+
+
+# Try five approaches
+1. Segmented regression on water temperature - linked segment lines
+2. Structural Change on water temperature - unlinked segment lines
+3. Gams
+4. Linear models based on synchrony between air and water temperature 
+5. Breakpoints based on synchrony between air and water temperature
+
+## 1.Segmented regression 
+Find break points for waterTemp for winter, ascending, and descending across all years
+This look pretty good
+```{r segmented regression for all years}
+
+# find two breakpoints with initial guesses of 100 and 200
+segE <- segmented( lm(waterTempWPred~dOY, data=e[e$year %in% 1998:2011,]), seg.Z=~dOY, psi=list(dOY=c(100,200)))
+
+plot(segE,color='red')
+points(e$dOY,e$waterTempWPred)
+lines(segE,color='red') #puts red dots at breakpoints
+
+
+#slope(segE)
+
+#break1E <- summary(segE)$psi[1,2]
+#break2E <- summary(segE)$psi[2,2]
+
+#e$segE <- ifelse( e$dOY < break1E,1,ifelse( e$dOY < break2E,2,3 ))
+```
+Segmented regression for a single year 
+This does not look good. 
+Some years give bad breakpoints
+```{r segmented regression for each year}
+
+segE <- segmented( lm(waterTempWPred~dOY, data=e[e$year %in% 2004,]), seg.Z=~dOY, psi=list(dOY=c(100,200)))
+
+plot(segE)
+points(e$dOY[e$year %in% 2004],e$waterTempWPred[e$year %in% 2004])
+
+```
+
+## 2.StrucChange (r package)
+doesn't connect regression lines
+results don't line up with visual inspection
+Use tempIndex (defined below) as data for 'sturctual chagne' in the time series
+```{r strucChange}
+e$tempIndex <- (e$waterTempWPred-e$airTemp)/e$waterTempWPred
+
+year=2004
+holdData <- ts(e[e$year == year,'tempIndex'], start=1, end=366)
+hold <- breakpoints( holdData ~ 1 )
+bp <- data.frame(breakpoints(hold)[1] )
+
+#ggplot( e[e$year  %in% year ,], aes(dOY,tempIndex)) +
+ggplot( e[e$year  %in% year ,], aes(dOY,tempIndex)) +
+  geom_point() +
+  geom_vline( aes( xintercept =  breakpoints  ),bp)
+#
+
+
+# loop over years
+# breaksSD <- data.frame(array(NA,c(20,3)))
+# i=0
+# for (year in c(1998:1999,2001:2007,2010)){
+#   i=i+1
+#   print(c(i,year))
+#   out <- segmented( lm(tempIndex~dOY, data=e[e$year == year,]), seg.Z=~dOY, psi=list(dOY=c(100,200)))
+#   # out <- segmented( lm(movingSD~dOY, data=e[e$year == year,]), seg.Z=~dOY, psi=list(dOY=c(100,200)))
+#   
+#   breaksSD[i,1] <- year
+#   breaksSD[i,2] <- summary(out)$psi[1,2]
+#   breaksSD[i,3] <- summary(out)$psi[2,2]
+# }
+
+```
+
+## 3. Gams.
+These fit the temerature trend too well. Didn't see how get good model of waterTemp=f(airTemp)
+## 4. Linear models for subsets of data based on synchrony between air and water temperature.
+Look for days when get slopes of 0 between water and tempIndex. These are the synchronized days.
+These worked well, but are more complex than needed. Models are embedded in breakpoint code, but commented out.
+
+## 5. Breakpoints based on synchrony between air and water temperature.
+
+Based on raw data plot, looks like air and water temp get synchronized in the middle of the year
+Let's see if we can identfy a temperature index to determine breakpoints
+What about the ratio between water temp and air temp?
+```{r tempindex1}
+ggplot( e[e$year < 2012 ,], aes(dOY,waterTemp/airTemp))+
+  geom_point() +
+  geom_line() +
+  ylim(c(-2,5)) +
+  facet_wrap(~year)
+
+```
+try a scaled difference
+```{r tempindex2}
+ggplot( e[e$year < 2012 ,], aes(dOY,(airTemp-waterTemp)/airTemp))+
+  geom_point() +
+  geom_line() +
+  ylim(c(-2,5)) +
+  facet_wrap(~year)
+
+```
+
+Settled on this index because the low water temperatures
+in the winter exaggerate the lack of synchrony.
+Use this as the metric for defining when air and water temperature get synchronized
+```{r tempIndex} 
+e$tempIndex <- (e$waterTempWPred-e$airTemp)/e$waterTempWPred
+
+ggplot( e[e$year < 2012 ,], aes(dOY,tempIndex))+
+  geom_point() +
+  geom_line() +
+  ylim(c(-2,5)) +
+  facet_wrap(~year)
+
+
+```
+
+This doesn't gain anything over tempIndex
+```{r synchrony based on parallel changes in air and water }
+
+e$airTempLagged <- c(e$airTemp[2:nrow(e)],NA)
+e$deltaAir <- e$airTempLagged - e$airTemp
+e$waterTempWPredLagged <- c(e$waterTempWPred[2:nrow(e)],NA)
+e$deltaWaterWPred <- e$waterTempWPredLagged - e$waterTempWPred
+e$deltaRatio <- e$deltaWaterWPred-e$deltaAir
+
+ggplot( e[e$year==2000,], aes(dOY,deltaWaterWPred) )+
+  geom_point() +
+  geom_line() +
+  geom_point(aes(dOY,deltaAir), color='red') +
+  geom_line(aes(dOY,deltaAir), color='red') +
+  geom_line(aes(dOY,(deltaRatio)), color='blue') +
+  ylim(c(-20,30)) 
+
+ggplot( e[e$year==2000,], aes(deltaAir,deltaWaterWPred) )+
+  geom_point(aes(color=dOY)) 
+
+```
+
+
+
+## How can we use this synchrony to identify breakpoints?
+1. Calculate moving mean for tempIndex
+2. Compare moving mean to the 95% CI of tempIndex
+3. In spring, find the first day for which there is a run of 10 future days inside the CI
+4. In fall, find the last day with a preceding run of 10 days within the CI
+5. Use the water temperature segmented regression breakpoint as the breakpoint between  ascending temp and descending temp
+
+1-4. Calculate rolling windows (moving mean) for tempIndex
+Arbitrarily define the window size = 10
+```{r calculate rolling window}
+
+window <- 10
+
+movingMean <-  rollapply(e$tempIndex, width=window, fill=NA, mean)
+movingSD <-  rollapply(e$tempIndex, width=window, fill=NA, sd)
+
+drops <- c('movingMean','movingSD','movingMean','movingSD')
+e <- e[,!(names(e) %in% drops)]
+#e <- cbind(e,movingMean,movingSD)
+e <- cbind(e,movingMean,movingSD)
+
+e$meanSDDiff <- e$movingSD - e$movingMean
+
+# just to make sure the merge doesn't screw up order
+e <- e[order(e$date),]
+```
+
+
+## Define breakpoints
+```{r breakpoints}
+breakPoints <- data.frame(year=c(min(e$year):max(e$year)))
+breakPoints$springBP <- NA
+breakPoints$fallBP <- NA
+quantiles <- data.frame(year=c(min(e$year):max(e$year)))
+quantiles$lo <- NA
+quantiles$hi <- NA
+numForward <- 14 + 1 #7 + 1  
+centerPoints <- 125:275
+```
+Loop forward in time to find the 1st breakpoint - when air and water become synchronized in spring
+```{r loop forward_backward in time,results='hide'}
+for (year in c(1997:2011)){  # upper year limit is limited by daymet data
+  print(year) 
+
+  # Use predetermined breakpoints and add/subtract to find range to feed TIQ
+  TIQ <- quantile(e[e$year  %in% year & e$dOY %in% centerPoints,'tempIndex'], probs=c(0.005,0.5,0.995),na.rm=T)
+  movingSDQ <- quantile(e[e$year  %in% year & e$dOY %in% centerPoints,'movingSD'], probs=c(0.005,0.5,0.995),na.rm=T)
+
+  quantiles$lo[ quantiles$year == year ] <- TIQ[1]
+  quantiles$hi[ quantiles$year == year ] <- TIQ[3]
+
+  runs <- data.frame(array(NA,c(1,numForward)))
+  eYear <- e[e$year == year, ] 
+
+#  lmOut <- data.frame(array(NA,c(1,9)))
+  winFactor <- 2
+
+# time forward until approx breakpoint ascending/descending water temp (in 'breaks')
+for (i in 1:(200)){ #-window*winFactor )){
+
+# this is the lm part that I tried and abandoned because it was too complex  
+#   hold <- lm( tempIndex ~ dOY, e[ e$dOY %in% i:(i+window*winFactor-1) & e$year == year, ] )
+#   lmOut[i,1] <- i
+#   lmOut[i,2] <- 1
+#   lmOut[i,3] <- coef(hold)[1]
+#   lmOut[i,4] <- coef(hold)[2]
+#   lmOut[i,5] <- min(predict(hold))
+#   lmOut[i,6] <- max(predict(hold))
+#   lmOut[i,7] <- max(predict(hold))-min(predict(hold))
+#   lmOut[i,8] <- mean(predict(hold))
+#   lmOut[i,9] <- ( coef(hold)[2] - lmOut[i,6]  )
+#   
+  # look for runs of movingMean within 99% CI of tempIndex
+  # look forward numForward-1 steps
+  # each step is in 2:numForward cols or runs. product is in col 1
+  
+  for (ii in 2:numForward ){
+    runs[ i,ii ] <- 1*((eYear$movingMean[ i+ii-2 ] >= TIQ[1]) & (eYear$movingMean[ i+ii-2 ] <= TIQ[3]))
+    runs[ i,1 ] <- prod( runs[ i, 2:numForward ] )
+  }
+ }
+  
+
+#Loop backward in time to find the breakpoint when air and water temp become desynchronized in the fall 
+
+# Could make the 201 cutoff not arbitrary, by using use water temp break point. Seems like it won't matter
+# time backward until approx breakpoint ascending/descending water temp (in 'breaks')
+for (i in 366:(201)){ #-window*winFactor )){
+  for (ii in 2:numForward ){
+    
+    runs[ i,ii ] <- 1*((eYear$movingMean[ i-ii+2 ] >= TIQ[1]) & (eYear$movingMean[ i-ii+2 ] <= TIQ[3]))
+    runs[ i,1 ] <- prod( runs[ i, 2:numForward ] )
+  }
+
+}
+
+#slopeQ <- quantile(lmOut[150:250,c(4)], probs=c(0.005,0.5,0.995))
+#diffQ <- quantile(lmOut[150:250,c(9)], probs=c(0.005,0.5,0.995))
+
+breakPoints$springBP[ breakPoints$year == year ] <- min(which(runs[,1] == 1))
+breakPoints$fallBP[ breakPoints$year == year ] <- max(which(runs[,1] == 1))
+
+} #year loop
+
+# delete columns so don't get x.y after merge if columns are already in e
+e <- e[,!(names(e) %in% c('springBP','fallBP','lo','hi'))]
+
+e <- merge( x=e, y=breakPoints, all.x=T )
+e <- merge( x=e, y=quantiles, all.x=T )
+e <- e[order(e$date),]
+```
+
+5.Segmented regression of water temperature to get breakpoint between ascending and descending water temps by year
+
+This works well for second breakpoint for all years - not always well for first breakpoint
+
+Change (10/24/2013) only calc bp 2 using data btw bp1 and bp3
+```{r get breakpoint 2,results='hide'}
+breaks <- data.frame(array(NA,c(20,2)))
+outList <- list()
+#gSegmented <- list()
+dOYValues <- list()
+datList <- list()
+i=0
+for (year in c(1998:2012)){
+  print(year)
+  i=i+1
+  breaks[i,1] <- year
+  if(year %in% completeYears$year[ completeYears$river == river ]){
+
+  dat <- e[e$year == year & e$river == river & e$dOY >= e$springBP & e$dOY <= e$fallBP,]  
+  datList[[i]] <- dat 
+  
+  out <- segmented( lm(waterTempWPred~dOY, data=dat), seg.Z=~dOY, psi=list(dOY=c(200)))
+  outList[[i]] <- out  # may not need to save this
+
+  breaks[i,2] <- summary(out)$psi[1,2]
+  
+  dOYValues[[i]] <- min(dat$dOY):max(dat$dOY) 
+  
+  }
+}
+# 'b2',now called summerBP, is the break between the ascending and descending limbs
+names(breaks) <- c('year','summerBP')
+
+breaks$summerBP[ is.na(breaks$summerBP) ] <- mean(breaks$summerBP,na.rm=T)
+
+# delete columns so don't get x.y after merge if columns are already in e
+e <- e[,!(names(e) %in% c('summerBP'))]
+e <- merge( x=e, y=breaks, by='year',all.x=T)
+
+# just to make sure the merge doens't screw up order
+e <- e[order(e$date),]
+
+#e$segWaterTemp <- ifelse( e$dOY < e$summerBP,1,2 )
+```
+```{r plot breakpoints}
+ggplot(breaks, aes(year,summerBP)) +
+  geom_point()
+```
+
+Assign categories [segment] to each dOY based on breakpoints
+```{r assign segment}
+e$segment <- NA
+e$segment <- ifelse( e$dOY <= e$springBP,3,
+             ifelse( e$dOY <= e$summerBP,1,
+             ifelse( e$dOY <= e$fallBP,2,3)))
+
+# year segment includes early winter of the next year with the current year
+e$yearSegment <- e$year
+e$yearSegment <- ifelse( e$dOY > e$fallBP,e$yearSegment+1,e$yearSegment )
+```
+
+```{r save e}
+
+save(e, file='D:/PITTAGMAIN/temperature modeling/temperatureProject/e.RData')
+#  load e when starting a new session and you don't want to run all the code
+```
+
+
+## Graph for checking breakpoints
+```{r breakpoint figure, fig.width=10, fig.height=8}
+# graph for breakpoints
+ggplot( e[e$year %in% 1998:2011,], aes((dOY),(tempIndex))) +
+ #ggplot( e[e$year==2006,], aes(dOY,tempIndex)) +
+  geom_point() +
+#  geom_point(aes(dOY,movingSD), colour='red') +
+#  geom_line(aes(dOY,airTemp), colour='red') +
+#  geom_line(aes(dOY,waterTemp), colour='darkred') +
+  geom_point(aes(dOY,movingMean), colour='blue') +
+  geom_point(aes(dOY,segment*2, colour=factor(yearSegment))) +
+  geom_hline( aes(yintercept=lo), colour='black') +
+  geom_hline( aes(yintercept=hi), colour='black') +
+  geom_vline( aes(xintercept=as.numeric(springBP)), colour='green') +
+  geom_vline( aes(xintercept=as.numeric(fallBP)), colour='orange') +
+  geom_vline( aes(xintercept=as.numeric(summerBP)), colour='blue') +
+  ylim(c(-10,10))  +
+ #  xlim(c(80,120))+
+  ggtitle(paste(year,window,winFactor,sep=" ")) +
+  facet_wrap(~year)
+
+# for MS
+gBP <- ggplot( e[e$year %in% 1998:2011,], aes((dOY),(movingMean))) +
+ #ggplot( e[e$year==2006,], aes(dOY,tempIndex)) +
+  theme_bw(base_size=10) +
+  geom_point() +
+  geom_hline( aes(yintercept=lo), colour='black') +
+  geom_hline( aes(yintercept=hi), colour='black') +
+  geom_vline( aes(xintercept=as.numeric(springBP)),size=1) +
+  geom_vline( aes(xintercept=as.numeric(fallBP)),size=1.5) +
+  geom_vline( aes(xintercept=as.numeric(summerBP)),size=1.5) +
+  scale_x_continuous('Day of year')  +
+    scale_y_continuous('Temperature index', lim=c(-10,10))  +
+  facet_wrap(~year)
+
+ggsave( file=paste(msWD,'/gBP.png',sep=''), plot=gBP, dpi=dpiIn , width=8,height=5, units='in',scale=2 )
+
+```
+
+```{r main explanatory graph for MS}
+#clumsy way to get data ready for bp2 graphs
+segDF <- data.frame(rbind(
+                          #cbind(rep(1998,nrow(datList[[1]])),datList[[1]]$dOY,datList[[1]]$waterTempWPred,outList[[1]]$fitted.values),
+                      #    cbind(rep(1999,nrow(datList[[2]])),datList[[2]]$dOY,datList[[2]]$waterTempWPred,outList[[2]]$fitted.values),
+                      #    cbind(rep(2000,nrow(datList[[3]])),datList[[3]]$dOY,datList[[3]]$waterTempWPred,outList[[3]]$fitted.values),
+                      #    cbind(rep(2001,nrow(datList[[4]])),datList[[4]]$dOY,datList[[4]]$waterTempWPred,outList[[4]]$fitted.values),
+                      #    cbind(rep(2002,nrow(datList[[5]])),datList[[5]]$dOY,datList[[5]]$waterTempWPred,outList[[5]]$fitted.values),
+                      #    cbind(rep(2003,nrow(datList[[6]])),datList[[6]]$dOY,datList[[6]]$waterTempWPred,outList[[6]]$fitted.values),
+                      #    cbind(rep(2004,nrow(datList[[7]])),datList[[7]]$dOY,datList[[7]]$waterTempWPred,outList[[7]]$fitted.values),
+                          cbind(rep(2005,nrow(datList[[8]])),datList[[8]]$dOY,datList[[8]]$waterTempWPred,outList[[8]]$fitted.values),
+                          cbind(rep(2006,nrow(datList[[9]])),datList[[9]]$dOY,datList[[9]]$waterTempWPred,outList[[9]]$fitted.values),
+                          cbind(rep(2007,nrow(datList[[10]])),datList[[10]]$dOY,datList[[10]]$waterTempWPred,outList[[10]]$fitted.values),
+                          cbind(rep(2008,nrow(datList[[11]])),datList[[11]]$dOY,datList[[11]]$waterTempWPred,outList[[11]]$fitted.values),
+                          cbind(rep(2009,nrow(datList[[12]])),datList[[12]]$dOY,datList[[12]]$waterTempWPred,outList[[12]]$fitted.values),
+                          cbind(rep(2010,nrow(datList[[13]])),datList[[13]]$dOY,datList[[13]]$waterTempWPred,outList[[13]]$fitted.values),
+                          cbind(rep(2011,nrow(datList[[14]])),datList[[14]]$dOY,datList[[14]]$waterTempWPred,outList[[14]]$fitted.values)) )
+names(segDF) <- c('year','dOY','w','pred')
+
+
+
+yearsForGraph <- 2000:2001
+yearsForGraph <- 2005:2006
+
+gAirWater <- 
+  ggplot( e[e$year %in% yearsForGraph,], aes(dOY,airTemp) )+
+  theme_bw(base_size=10) +
+  #geom_point(size=.85) +
+  geom_line() +
+  #geom_point(aes(dOY,waterTempWPred), color='red',size=.85) +
+  geom_line(aes(dOY,waterTempWPred), color='red') +
+  theme( axis.title.x = element_blank() ) +
+  scale_y_continuous(expression(paste("Temperature (",degree, "C)", sep = "")),lim=(c(-20,30)) )+
+  facet_wrap(~year,nrow=1)
+
+gTempIndex <- 
+  ggplot( e[e$year %in% yearsForGraph,], aes((dOY),(movingMean))) +
+    theme_bw(base_size=10) +
+    geom_point() +
+   # geom_line() +
+    geom_hline( aes(yintercept=lo), colour='black') +
+    geom_hline( aes(yintercept=hi), colour='black') +
+    geom_vline( aes(xintercept=as.numeric(springBP)),size=1) +
+    geom_vline( aes(xintercept=as.numeric(fallBP)),size=1.5) +
+  #  geom_vline( aes(xintercept=as.numeric(summerBP)),size=1.5) +
+  #  scale_x_continuous()  +
+        theme( strip.text.x = element_blank() , 
+           strip.background = element_blank(),
+           axis.title.x = element_blank() ) +
+    scale_y_continuous('Moving mean of temperature index', lim=c(-15,10))  +
+    facet_wrap(~year,nrow=1)
+
+############### bp 2 ######
+
+gSeg <- 
+  ggplot( segDF[segDF$year %in% yearsForGraph,], aes(dOY,w) ) +
+    geom_point() +
+    geom_line(aes(dOY,pred)) +
+    theme_bw(base_size=10) +
+    scale_x_continuous('Day of year', lim=c(0,365))  +
+    theme( strip.text.x = element_blank() , 
+           strip.background = element_blank(),
+           axis.title.x = element_blank() ) +
+    scale_y_continuous(expression(paste("Water temperature (",degree, "C)", sep = ""))) +
+    facet_wrap(~ year,nrow=1)
+###########
+
+gBP <- ggplot( e[e$year %in% yearsForGraph,], aes((dOY),(movingMean))) +
+ #ggplot( e[e$year==2006,], aes(dOY,tempIndex)) +
+  theme_bw(base_size=10) +
+  theme(strip.text.x = element_blank() , 
+  strip.background = element_blank())+
+  geom_point() +
+  geom_line() +
+  geom_hline( aes(yintercept=lo), colour='black') +
+  geom_hline( aes(yintercept=hi), colour='black') +
+  geom_vline( aes(xintercept=as.numeric(springBP)),size=1) +
+  geom_vline( aes(xintercept=as.numeric(fallBP)),size=1.5) +
+  geom_vline( aes(xintercept=as.numeric(summerBP)),size=1.5) +
+  scale_x_continuous('Day of year')  +
+  scale_y_continuous('Moving mean of temperature index', lim=c(-75,50))  +
+  facet_wrap(~year,nrow=1)
+
+gIndex <- arrangeGrob( gAirWater,gTempIndex,gSeg,gBP,ncol=1 )
+#ggsave( file=paste(msWD,'/gIndex1999_2011.png',sep=''), plot=gIndex, dpi=dpiIn , width=16,height=8, units='in', scale=2 )
+ggsave( file=paste(msWD,'/gIndex2000_2001.png',sep=''), plot=gIndex, dpi=dpiIn , width=10,height=8, units='in', scale=2 )
+
+
+```
+
+# Slopes by segment
+```{r main regression plot for MS,fig.width=11, fig.height=9}
+gSegs <- 
+ggplot( e[e$year %in% 1998:2011 & e$segment %in% 1:2,], aes( airTemp,waterTempWPred, color=factor(segment) ))+
+  geom_point()+
+  geom_point(data=e[e$year %in% 1998:2011 & e$segment %in% 3,],aes(airTemp,waterTempWPred)) +
+  geom_smooth( method='lm',se=F, size=1.25)+
+  theme_bw(base_size=10) +
+  theme(legend.position="none")+
+  scale_x_continuous(expression(paste("Air temperature (",degree, "C)", sep = ""))) +
+  scale_y_continuous(expression(paste("Water temperature (",degree, "C)", sep = "")), lim=c(-1,22)) +
+  facet_wrap( ~ year)#Segment ) 
+
+ggsave( file=paste(msWD,'/gSegs.png',sep=''), plot=gSegs, dpi=dpiIn , width=8,height=5, units='in', scale=2 )
+
+
+```
+Segments for 1 example year
+```{r}
+ggplot( e[e$yearSegment %in% 2005,], aes( airTemp,waterTempWPred, color=(dOY) ))+
+  geom_point()+
+  geom_smooth( method='lm')+
+  facet_wrap( ~segment )
+```
+
+### Check use of min or max air temp instead of mean, briefly
+fits don't seem to change using min or max air compared with mean airTemp
+```{r}
+ggplot( e[e$yearSegment %in% 1999,], 
+        aes( 
+          tAirMin#tAirMax#airTemp
+          ,waterTempWPred, color=(dOY) ))+ 
+  geom_point()+
+  geom_smooth( method='lm')+
+  facet_wrap( ~segment )
+```
+
+# Statistical models by segment
+Simple lm's (waterTempWPred ~ airTemp...) with segment as a factor
+Most complex model is by far the best based on AIC
+```{r, lm models}
+dat <- e[e$yearSegment %in% 1998:2011 & e$segment %in% 1:2,]
+m1a <- lm( waterTempWPred ~ airTemp*factor(segment),                                            data=dat)
+m1b <- lm( waterTempWPred ~ airTemp*factor(segment)*factor(yearSegment),                        data=dat)
+m1c <- lm( waterTempWPred ~ airTemp*factor(segment)*factor(yearSegment) + flow,                 data=dat)
+m1d <- lm( waterTempWPred ~ airTemp*factor(segment)*factor(yearSegment) + flow*factor(segment), data=dat)
+m1e <- lm( waterTempWPred ~ airTemp*factor(segment)*factor(yearSegment) * flow,                 data=dat)
+m1f <- lm( waterTempWPred ~ airTemp*factor(yearSegment) * flow,                                 data=dat)
+m1g <- lm( waterTempWPred ~ airTemp*factor(segment) * flow,                                     data=dat)
+
+AIC(m1a,m1b,m1c,m1d,m1e,m1f,m1g)
+plot(residuals(m1a))
+acf(residuals(m1a))
+summary(m1e)
+
+#anova(m1a,m1b,m1c,m1d,m1e)
+
+#predict(m1e,data.frame(airTemp=3,segment=1,yearSegment=1999,flow=10:20),se.fit=T)
+```
+
+```{r look for patterns in flow and rain effects on air/water in 2D}
+
+e$rain0001 <- log(e$rain0 + 0.001)
+
+ggplot( e[e$yearSegment %in% 2006:2009 &e$segment %in% 2 ,], aes( airTemp,waterTempWPred ))+
+  geom_point(aes( colour=log(flow)))+
+  geom_path(aes( colour=log(flow)))+
+ # geom_point(aes( colour=(rain0001 )))+
+#   geom_path(aes( colour=(rain0001 )))+
+ # geom_text(aes(label=dOY,color=factor(dOY)))+
+  geom_smooth( method='lm',se=F)+
+  scale_colour_gradientn(colours = rainbow(3))+
+  facet_grid(segment~year)
+
+```
+
+
+Is there autocorrelation among the residuals?
+```{r autocorrelation}
+#I don't think we need to deal with autocorrelation because waterTemp/airTemp bounces around over time. See fig below:
+
+
+
+hist(log(e[e$yearSegment %in% 1999 &e$segment %in% 1 ,'flow']))
+hist(e$rain0001)
+
+r <- residuals(m1e)
+acf(r) 
+
+m3a <- gls( waterTempWPred ~ airTemp*factor(segment)*factor(yearSegment) * flow, data=dat, na.action=na.omit )
+m3b <- gls( waterTempWPred ~ airTemp*factor(segment)*factor(yearSegment) * flow, data=dat, na.action=na.omit, correlation=corAR1(form=~1) )
+m3c <- gls( waterTempWPred ~ airTemp*factor(segment)*factor(yearSegment) * flow, data=dat, na.action=na.omit, correlation=corAR1(form=~dOY|year) )
+
+AIC(m3a,m3b,m3c)
+
+plot(residuals(m3b))
+acf(residuals(m3b))
+```
+
+
+Random effects models across years with segment as a factor
+```{r RE models, cache=TRUE}
+
+dat <- e[e$yearSegment %in% 1998:2011 & e$segment %in% 1:2,]
+
+m2a <- lmer( waterTempWPred ~   airTemp*factor(segment)* flowScaled + (1|yearSegment),                                              data=dat)
+
+m2b <- lmer( waterTempWPred ~   airTemp*factor(segment)* flowScaled + (factor(segment)|yearSegment),                                              data=dat)
+
+# sticking with m2b because want to accout for yearly effects but leave variation in other effects in the fixed effects
+
+m2b <- lmer( waterTempWPred ~   airTemp*factor(segment)* flowScaled + (airTemp|yearSegment),                                        data=dat)
+m2c <- lmer( waterTempWPred ~   airTemp*factor(segment)* flowScaled + (airTemp|yearSegment)+(1|yearSegment),                        data=dat)
+m2d <- lmer( waterTempWPred ~   airTemp*factor(segment)* flowScaled + (airTemp|yearSegment)+(flowScaled|yearSegment),                     data=dat)
+m2e <- lmer( waterTempWPred ~   airTemp*factor(segment)* flowScaled + (airTemp|yearSegment)+(flowScaled*factor(segment)|yearSegment),     data=dat)
+m2f <- lmer( waterTempWPred ~   airTemp*factor(segment)* flowScaled + (1+airTemp|yearSegment)+(1+flowScaled*factor(segment)|yearSegment), data=dat) # same as m2e
+m2g <- lmer( waterTempWPred ~ 0+airTemp*factor(segment)* flowScaled + (0+airTemp|yearSegment)+(0+flowScaled*factor(segment)|yearSegment), data=dat) 
+
+AIC(m2a,m2b,m2c,m2d,m2e,m2f,m2g)
+summary(m2b)
+```
+
+```{r predicted values}
+mod <- m2b
+f <- fixef(mod)
+
+pAirTemp <- seq(0,30,10)
+pSegment <- 0:1
+pFlow <- c(-2,-1,0,1,2)
+pIn <- expand.grid(pAirTemp=pAirTemp,pSegment=pSegment,pFlow=pFlow)
+pIn$pred <- f[1] + f[2]*pIn$pAirTemp + f[3]*pIn$pSegment + f[4]*pIn$pFlow + f[5]*pIn$pAirTemp*pIn$pSegment + f[6]*pIn$pAirTemp*pIn$pFlow + f[7]*pIn$pSegment*pIn$pFlow  + f[8]*pIn$pAirTemp*pIn$pSegment*pIn$pFlow
+pIn$segLabel <- ifelse(pIn$pSegment == 0,'Rising','Falling')
+pIn$segLabel <- factor(pIn$segLabel,levels=c('Rising','Falling'), ordered=T)
+
+gPred <- 
+ggplot( pIn, aes(pAirTemp,pred)) +
+  geom_point(aes(shape=factor(pFlow)),size=3) +
+  geom_line(aes(linetype=factor(pFlow)),size=1) +
+  theme_bw(base_size=10) +
+#  theme(legend.position="none")+
+  scale_x_continuous(expression(paste("Air temperature (",degree, "C)", sep = ""))) +
+  scale_y_continuous(expression(paste("Predicted water temperature (",degree, "C)", sep = ""))) +
+#  ggtitle(mod@call)+
+  facet_grid(~segLabel)
+
+ggsave( file=paste(msWD,'/gPred.png',sep=''), plot=gPred, dpi=dpiIn , width=8,height=5, units='in',scale=2 )
+
+```
+
