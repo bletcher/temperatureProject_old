@@ -11,9 +11,6 @@ source('D:/GitHub/projects/temperatureProject/temperatureModelingFunctions.R')
 
 ```
 
-
-
-
 ```{r figure options}
 msWD <- 'D:/BEN/Manuscripts/2013-stream temp modeling/figures'
 dpiIn <- 200     # change to match journal requirements
@@ -233,6 +230,27 @@ sitesForReg <- c('WB JIMMY','WB MITCHELL','WB OBEAR','WEST BROOK')
 
 dat <- et[et$year %in% yearsForReg & et$site %in% sitesForReg & et$segment %in% 2:3,]
 
+# add in dayMet data
+
+dat$airTemp2 <- dat$airTemp^2
+dat$srad2 <- dat$srad^2
+dat$swe2 <- dat$swe^2
+dat$vp2 <- dat$vp^2
+
+dat$sradS <- scale(dat$srad)
+dat$sweS <- scale(dat$swe)
+dat$vpS <-  scale(dat$vp)
+dat$srad2S <-scale(dat$srad^2)
+dat$swe2S <- scale(dat$swe^2)
+dat$vp2S <-  scale(dat$vp^2)
+
+dat$lSradResidS <- scale(dat$lSradResid)
+dat$lSweResidS <- scale(dat$lSweResid)
+dat$lVpResidS <-  scale(dat$lVpResid)
+dat$lSradResid2S <- scale(dat$lSradResid^2)
+dat$lSweResid2S <- scale(dat$lSweResid^2)
+dat$lVpResid2S <-  scale(dat$lVpResid^2)
+
 m1a <- lm( temp ~ airTemp*factor(segment),                                     data=dat)
 m1b <- lm( temp ~ airTemp*factor(segment)*factor(year),                        data=dat)
 m1c <- lm( temp ~ airTemp*factor(segment)*factor(year)*factor(site),           data=dat)
@@ -243,6 +261,51 @@ AIC(m1a,m1b,m1c,m1d,m1e)
 plot(residuals(m1a))
 acf(residuals(m1a))
 summary(m1e)
+
+
+
+m1f <- lm( temp ~ airTemp*factor(segment)*factor(year)*factor(site) * flowZScore +
+                 airTemp2*factor(segment)*factor(year)*factor(site) * flowZScore  
+           ,data=dat)
+
+m1g <- lm( temp ~ airTemp*factor(segment)*factor(year)*factor(site) * flowZScore +
+                 airTemp2*factor(segment)*factor(year)*factor(site) * flowZScore +
+                     sradS*factor(segment)*factor(year)*factor(site) * flowZScore +
+                    srad2S*factor(segment)*factor(year)*factor(site) * flowZScore 
+           ,  data=dat)
+m1h <- lm( temp ~ airTemp*factor(segment)*factor(year)*factor(site) * flowZScore +
+                 airTemp2*factor(segment)*factor(year)*factor(site) * flowZScore +
+                     sradS*factor(segment)*factor(year)*factor(site) * flowZScore +
+                    srad2S*factor(segment)*factor(year)*factor(site) * flowZScore +
+                       vpS*factor(segment)*factor(year)*factor(site) * flowZScore +
+                      vp2S*factor(segment)*factor(year)*factor(site) * flowZScore 
+           ,  data=dat)
+
+###### working model #############
+m1i <- lm( temp ~ airTemp*factor(segment)*factor(year)*factor(site) * flowZScore +
+                 airTemp2*factor(segment)*factor(year)*factor(site) * flowZScore +
+                     lSradResidS*factor(segment)*factor(year)*factor(site) * flowZScore +
+                    lSradResid2S*factor(segment)*factor(year)*factor(site) * flowZScore +
+                       lVpResidS*factor(segment)*factor(year)*factor(site) * flowZScore +
+                      lVpResid2S*factor(segment)*factor(year)*factor(site) * flowZScore +
+                      lSweResidS*factor(segment)*factor(year)*factor(site) * flowZScore +
+                     lSweResid2S*factor(segment)*factor(year)*factor(site) * flowZScore 
+           ,  data=dat)
+#######################
+
+# take out airTemp2
+m1j <- lm( temp ~  airTemp*factor(segment)*factor(year)*factor(site) * flowZScore +
+#                 airTemp2*factor(segment)*factor(year)*factor(site) * flowZScore +
+                     sradS*factor(segment)*factor(year)*factor(site) * flowZScore +
+                    srad2S*factor(segment)*factor(year)*factor(site) * flowZScore +
+                       vpS*factor(segment)*factor(year)*factor(site) * flowZScore +
+                      vp2S*factor(segment)*factor(year)*factor(site) * flowZScore +
+                      sweS*factor(segment)*factor(year)*factor(site) * flowZScore +
+                     swe2S*factor(segment)*factor(year)*factor(site) * flowZScore 
+           ,  data=dat)
+
+AIC(m1e,m1f,m1g,m1h,m1i,m1j)
+
 
 #anova(m1a,m1b,m1c,m1d,m1e)
 
@@ -264,8 +327,78 @@ ggplot( e[e$year %in% 2006:2009 &e$segment %in% 2 ,], aes( airTemp,waterTempWPre
 
 ```
 
+Random effects model including dayMet data
+```{r re}
+
+m3a <- lmer( temp ~      airTemp*factor(segment)*factor(site) * flowZScore +
+                        airTemp2*factor(segment)*factor(site) * flowZScore +
+                     lSradResidS*factor(segment)*factor(site) * flowZScore +
+                    lSradResid2S*factor(segment)*factor(site) * flowZScore +
+                       lVpResidS*factor(segment)*factor(site) * flowZScore +
+                      lVpResid2S*factor(segment)*factor(site) * flowZScore +
+                      lSweResidS*factor(segment)*factor(site) * flowZScore +
+                     lSweResid2S*factor(segment)*factor(site) * flowZScore + 
+                    (factor(segment)|year), data=dat)
+
+ 
+```
+
+predicted with dayMet
+```{r predicted values}
+mod <- m3a
+f <- fixef(mod)
+
+# to help identify airTemp axis label boundaries
+quants <- ddply(et[!is.na(et$segment),],.(site,segment),summarise,
+                  lo=quantile(airTemp,probs=c(0.025),na.rm=T),
+                  hi=quantile(airTemp,probs=c(0.975),na.rm=T))
+
+
+pAirTemp <- c(5,10,15,20,24)
+pAirTemp2 <- pAirTemp^2 
+pSradS <- 0#c(-2,-1,0,1,2)
+pSrad2S <- pSradS
+pVpS <- 0#c(-2,-1,0,1,2)
+pVp2S <- pVpS
+pSweS <- 0#c(-2,-1,0,1,2)
+pSwe2S <- pSweS
+pSegment <- 2:3
+pFlow <- c(-2,-1,0,1,2)
+pSite <- c('WB JIMMY','WB MITCHELL','WB OBEAR','WEST BROOK')
+#pSite <- c('WB OBEAR','WEST BROOK')
+#pSite <- c('WB OBEAR')
+pIn <- expand.grid(airTemp=pAirTemp,airTemp2=pAirTemp2,
+                   lSradResidS=pSradS,lSradResid2S=pSrad2S,
+                   lVpResidS=pVpS,lVpResid2S=pVp2S,
+                   lSweResidS=pSweS,lSweResid2S=pSwe2S,
+                   segment=pSegment,flowZScore=pFlow,site=pSite)
+
+pIn$pred <- predict(mod,REform=NA,newdata=pIn) #REform=NA means REs are set to 0
+
+pIn$segLabel <- ifelse(pIn$segment == 2,'Rising','Falling')
+pIn$segLabel <- factor(pIn$segLabel,levels=c('Rising','Falling'), ordered=T)
+
+pIn$riverText <- riverLabeller('site',pIn$site)
+pIn$riverText <- factor(pIn$riverText,levels=c('WEST BROOK','WB JIMMY','WB MITCHELL','WB OBEAR'),labels=c("WB","OL","OS","Is"), ordered=T)
+
+gPred <- 
+ggplot( pIn, aes(airTemp,pred)) +
+  geom_point(aes(shape=factor(flowZScore)),size=3) +
+#  geom_line(aes(linetype=factor(flowZScore)),size=1) +
+  theme_bw(base_size=10) +
+#  theme(legend.position="none")+
+  scale_x_continuous(expression(paste("Air temperature (",degree, "C)", sep = ""))) +
+  scale_y_continuous(lim=c(0,25),expression(paste("Predicted water temperature (",degree, "C)", sep = ""))) +
+#  ggtitle(mod@call)+
+  facet_grid(riverText~segLabel); if(plotFigs)gPred
+
+ggsave( file=paste(msWD,'/gPred.png',sep=''), plot=gPred, dpi=dpiIn , width=6,height=5, units='in',scale=2 )
+
+```
+
 
 Random effects models across years with segment as a factor
+Without dayMet data
 ```{r RE models, cache=TRUE}
 
 yearsForReg <- 2002:2011
@@ -277,7 +410,11 @@ sitesForReg <- c('WB JIMMY','WB MITCHELL','WB OBEAR','WEST BROOK')
 dat <- et[et$year %in% yearsForReg & et$site %in% sitesForReg & et$segment %in% 2:3,]
 
 m2a <- lmer( temp ~   airTemp*factor(segment)* factor(site) * flowZScore + (1|year),                                data=dat)
-m2b <- lmer( temp ~   airTemp*factor(segment)* factor(site) * flowZScore + (factor(segment)|year),                  data=dat)
+m2b <- lmer( temp ~   airTemp*factor(segment)* factor(site) * flowZScore + (factor(segment)|year), data=dat)
+
+m2c <- lmer( temp ~   airTemp*airTemp2*factor(segment)* factor(site) * flowZScore + (factor(segment)|year), data=dat)
+
+
 #m2c <- lmer( temp ~   airTemp*factor(segment)* factor(site) * flowZScore + (factor(site)|year),                  data=dat)
 # does not converge
 m2c <- lmer( temp ~   airTemp*factor(segment)* factor(site) * flowZScore + (factor(segment)|year) + (factor(site)|year),                  data=dat)
@@ -302,7 +439,7 @@ ggplot(dat,aes(flowScaled))+
 ```
 
 ```{r predicted values}
-mod <- m2b
+mod <- m2c
 f <- fixef(mod)
 
 # to help identify airTemp axis label boundaries
@@ -311,13 +448,14 @@ quants <- ddply(et[!is.na(et$segment),],.(site,segment),summarise,
                   hi=quantile(airTemp,probs=c(0.975),na.rm=T))
 
 
-pAirTemp <- c(5,24)
+pAirTemp <- c(5,10,15,20,24)
+pAirTemp2 <- c(5^2,10^2,15^2,20^2,24^2)
 pSegment <- 2:3
 pFlow <- c(-2,-1,0,1,2)
 pSite <- c('WB JIMMY','WB MITCHELL','WB OBEAR','WEST BROOK')
 #pSite <- c('WB OBEAR','WEST BROOK')
 #pSite <- c('WB OBEAR')
-pIn <- expand.grid(airTemp=pAirTemp,segment=pSegment,flowZScore=pFlow,site=pSite)
+pIn <- expand.grid(airTemp=pAirTemp,segment=pSegment,flowZScore=pFlow,site=pSite,airTemp2=pAirTemp2)
 
 pIn$pred <- predict(mod,REform=NA,newdata=pIn) #REform=NA means REs are set to 0
 

@@ -3,8 +3,8 @@
 
 rm(list=ls())
 
-for(f in c(4,7,14)){
-  for(w in c(5,10,20)){
+for(f in seq(4,20,2)){
+  for(w in seq(4,20,2)){
 print(c(f,w))
 
 load(paste('D:/GitHub/projects/temperatureProject/eWB.RData',sep=''))
@@ -326,3 +326,30 @@ if(!exists("breaksOut")) breaksOut <- cbind(w,f,breaks)
 save(breaksOut,file='D:/GitHub/projects/temperatureProject/breaksOut.RData')
 
 ```
+
+```{r graphs}
+bpO <- melt(breaksOut[,1:7], id.vars=1:4)
+bpO$siteYear <- paste(bpO$site,bpO$year)
+bpO$vw <- paste(bpO$variable,bpO$w)
+
+ggplot(bpO[bpO$site=='WEST BROOK' &bpO$year %in% 2003,],#2002:2011,], 
+#ggplot(bpO[bpO$year <2012,],        
+       aes( f,value, group=factor(vw) ))+
+  geom_point(aes(color=factor(w),shape=factor(w)),size=7)+
+  geom_line(aes(color=factor(w)))+ 
+  facet_grid(site~year)
+
+library(directlabels)
+
+g <- 
+  ggplot(bpO[bpO$site=='WEST BROOK' & bpO$year %in% 2002:2006,],#2002:2011,], 
+  aes(x=f,y=w,z=value)) +
+#    geom_tile(aes(fill = value))+
+  geom_contour(aes(colour = ..level..))+
+  geom_text(aes(label=value))+
+  facet_grid(year~variable)#,scales='free_x')+
+#geom_dl(aes(label=variable),method="last.points")
+direct.label(g)
+
+```
+

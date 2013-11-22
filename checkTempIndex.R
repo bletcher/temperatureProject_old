@@ -1,4 +1,4 @@
-ggplot( et[et$year %in% 2012 & et$site %in% 'WB JIMMY',], aes(dOY,temp))+
+ggplot( et[et$year %in% 2003 & et$site %in% 'WEST BROOK',], aes(dOY,temp))+
   geom_point(size=2) +
   geom_point( aes(dOY,airTemp), colour='red', size=2) +
  # geom_point( aes(dOY,(waterDelta-airDelta)/waterDelta), colour='green', size=2) +

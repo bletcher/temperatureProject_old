@@ -54,7 +54,7 @@ if( !reRunBP ) {
 
 ```{r make graphs?}
 # settings variables
-makeSpringFallGraphs <- T
+makeSpringFallGraphs <- F
 ```
 
 
@@ -106,7 +106,7 @@ if( fileSource == 'WB'){
   dm$date <- as.POSIXct(strptime(paste(dm$year, dm$yday), format="%Y %j")) 
   dm$dOY <- dm$yday
   #master.data <- merge(x=master.data,y=dm[,c('date','tAirMax','tAirMin','airTemp','prcp','dayl')], by='date', all.x=T)
-  master.data <- merge(x=master.data,y=dm[,c('date','airTemp','prcp','srad')], by='date', all.x=T)
+  master.data <- merge(x=master.data,y=dm[,c('date','airTemp','prcp','srad','vp','swe','dayl')], by='date', all.x=T)
   # just to make sure the merge doens't screw up order
   master.data <- master.data[order(master.data$date),]
   
@@ -203,6 +203,17 @@ e$flowZScore <- (e$flow-e$meanFlowBySite)/e$stdFlowBySite
 
 e <- e[order(e$count),]
 
+#pairs(e[,c('temp1','airTemp1','rain','flow','prcp','srad','vp','swe','dayl','dOY')])
+#take a look at the raw daymet data
+
+# get residual from a loess smooth across years, do it this way to deal with NAs
+e$lSradResid <- e$srad-predict(loess(srad~dOY, data=e ),e$dOY)
+e$lVpResid <- e$vp-predict(loess(vp~dOY, data=e ),e$dOY)
+e$lSweResid <- e$swe-predict(loess(swe~dOY, data=e ),e$dOY)
+
+# ggplot( e[e$year<2012,], aes(dOY, swe )) +
+#   geom_point(aes(color=factor(year))) +
+#   geom_smooth() 
 ```
 
 ```{r moving mean}
