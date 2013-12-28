@@ -30,14 +30,14 @@ fileSource <- 'Kyle'
 setwd('D:/GitHub/data/temperature/fromKyle/BP_Analysis/BP_Analysis')
 
 
-fileSource <- 'Craig'
-setwd('D:/GitHub/data/temperature/fromCraigDEWA')
+#fileSource <- 'Craig'
+#setwd('D:/GitHub/data/temperature/fromCraigDEWA')
 
 #fileSource <- 'Leslie'
 #setwd('D:/GitHub/data/temperature/fromLeslie')
 
-fileSource <- 'WB'
-setwd('D:/GitHub/data/temperature/fromWB')
+#fileSource <- 'WB'
+#setwd('D:/GitHub/data/temperature/fromWB')
 
 ```
 
@@ -54,18 +54,39 @@ if( !reRunBP ) {
 
 ```{r make graphs?}
 # settings variables
-makeSpringFallGraphs <- F
+makeSpringFallGraphs <- T
 ```
 
 
 ```{r load data}
-if ( reRunBP ){
+ if ( reRunBP ){
 
 if( fileSource == 'Kyle'){
   setwd('D:/GitHub/data/temperature/fromKyle/BP_Analysis/BP_Analysis')
+  
   load("Breakpoint_Analysis_Data_ALL_BEST_SITES.RData")  #master.data
   master.data$flow <- NA
+  
+  load('NewCovariateData_2013-12-20.RData') #covariate.data [fixed over time]  
+  covariate.data$site <- covariate.data$Site
+  
+  master.data <- merge( x = master.data, y = covariate.data, by = 'site', all.x=T )
+  
+#   ### read in day-met
+#   # taken from below
+#   dm1 <-  read.csv('d:/GitHub/data/daymet_westbrook.csv',header=T)
+#   dm <- dm1[dm1$year > 1996,]
+#   
+#   dm$tAirMin <- dm$tAirMinDM <- dm$tmin; dm$tAirMax <- dm$tAirMaxDM <- dm$tmax
+#   dm$airTemp <- dm$airTempDM <- (dm$tAirMinDM+dm$tAirMaxDM)/2
+#   
+#   dm$date <- as.POSIXct(strptime(paste(dm$year, dm$yday), format="%Y %j")) 
+#   dm$dOY <- dm$yday
+#   #master.data <- merge(x=master.data,y=dm[,c('date','tAirMax','tAirMin','airTemp','prcp','dayl')], by='date', all.x=T)
+#   master.data <- merge(x=master.data,y=dm[,c('date','airTemp','prcp','srad','vp','swe','dayl')], by='date', all.x=T)
+
 }
+
 if( fileSource == 'Leslie'){
   setwd('D:/GitHub/data/temperature/fromLeslie')
   master.data <- read.csv("Breakpoint_Data_FHR.csv",header=T)  #master.data
@@ -116,9 +137,7 @@ if( fileSource == 'WB'){
   md <- ddply(master.data,.(site,year),summarise,min=min(dOY),max=max(dOY))
   ggplot(md, aes(site,ymin=min,ymax=max,color=factor(year)))+geom_linerange()
   
-  setwd('D:/GitHub/data/temperature/fromWB')
-  
-  
+  setwd('D:/GitHub/data/temperature/fromWB')  
 
  }
 }
@@ -156,14 +175,14 @@ if( fileSource == 'WB') source('D:/GitHub/projects/temperatureProject/getPredict
 #e <- e[!is.na(e$temp) & !is.na(e$airTemp),]
 
 # WB is not in the right order, don't rename
-if( fileSource != 'WB'){names(e) <- c('date','dOY','year','site','temp','airTemp','rain','flow')}
+#if( fileSource != 'WB'){names(e) <- c('date','dOY','year','site','temp','airTemp','rain','flow')}
 
-# don't really use this
-e$season <- ifelse( e$dOY<80,1,
-            ifelse( e$dOY<172,2,
-            ifelse( e$dOY<264,3, 
-            ifelse( e$dOY<355,4,1  ))))
-e$season <- ifelse( e$dOY>355,1,e$season )
+# # don't really use this
+# e$season <- ifelse( e$dOY<80,1,
+#             ifelse( e$dOY<172,2,
+#             ifelse( e$dOY<264,3, 
+#             ifelse( e$dOY<355,4,1  ))))
+# e$season <- ifelse( e$dOY>355,1,e$season )
 
 # this is the key metric for estimating the synchrony between air and water temp 
 e$tempIndex <- (e$temp-e$airTemp)/(e$temp + 0.00000001) # add small # to avoid Inf
@@ -231,7 +250,7 @@ e$movingSD <- NA
 
 for (i in 1:nrow(siteYearCombos)){
 
-  print(c(i,as.character(siteYearCombos$site[i]),siteYearCombos$year[i]))
+  print(c(i,as.character(siteYearCombos$site[i]),siteYearCombos$year[i],i/nrow(siteYearCombos)))
   
   currSite <- which(e$site == as.character(siteYearCombos$site[i]) & e$year == siteYearCombos$year[i] )
 
@@ -686,7 +705,7 @@ gBP <- ggplot( temp, aes(dOY,tempIndex)) +
 
 
 #gSeg <- ggplot( temp, aes( airTemp,temp, color=factor(segmentWFill) ) ) +
-    
+if(any(!is.na(temp$segment))){    
 gSeg <- ggplot( temp, aes( airTemp,temp, color=factor(segment) ) ) +
   geom_point() +
   geom_smooth(method='lm') +  
@@ -697,8 +716,11 @@ gSeg <- ggplot( temp, aes( airTemp,temp, color=factor(segment) ) ) +
 #    scale_colour_manual(values = c('blue', "green",'red','grey')) +
   facet_wrap(~year)
 
-  gOut <- arrangeGrob( gBP, gSeg, ncol=1 )
+gOut <- arrangeGrob( gBP, gSeg, ncol=1 )
+}
 
+if(all(is.na(temp$segment))) { gOut <- arrangeGrob( gBP,  ncol=1 ) }
+  
   ggsave(plot=gOut,file=paste(getwd(),'/figs/springFallBP/',temp$site[1],".png",sep=''),dpi=300,width=6,height=8, units='in', scale=2)
 
 }
