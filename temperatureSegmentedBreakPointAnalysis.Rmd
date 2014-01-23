@@ -54,7 +54,7 @@ if( !reRunBP ) {
 
 ```{r make graphs?}
 # settings variables
-makeSpringFallGraphs <- T
+makeSpringFallGraphs <- F#T
 ```
 
 
@@ -64,26 +64,20 @@ makeSpringFallGraphs <- T
 if( fileSource == 'Kyle'){
   setwd('D:/GitHub/data/temperature/fromKyle/BP_Analysis/BP_Analysis')
   
-  load("Breakpoint_Analysis_Data_ALL_BEST_SITES.RData")  #master.data
+  #load("Breakpoint_Analysis_Data_ALL_BEST_SITES.RData")  #master.data, original from Kyle
+  load("Breakpoint_Analysis_Data_195sites_WithDayMet.RData")  #master.data, newer (Jan 2014) from Kyle
+ 
   master.data$flow <- NA
   
-  load('NewCovariateData_2013-12-20.RData') #covariate.data [fixed over time]  
+  #load('NewCovariateData_2013-12-20.RData') #original covariate.data [fixed over time]  
+  load('NewCovariateData_195sites.RData') #Jan 2014 covariate.data [fixed over time]
   covariate.data$site <- covariate.data$Site
   
   master.data <- merge( x = master.data, y = covariate.data, by = 'site', all.x=T )
   
-#   ### read in day-met
-#   # taken from below
-#   dm1 <-  read.csv('d:/GitHub/data/daymet_westbrook.csv',header=T)
-#   dm <- dm1[dm1$year > 1996,]
-#   
-#   dm$tAirMin <- dm$tAirMinDM <- dm$tmin; dm$tAirMax <- dm$tAirMaxDM <- dm$tmax
-#   dm$airTemp <- dm$airTempDM <- (dm$tAirMinDM+dm$tAirMaxDM)/2
-#   
-#   dm$date <- as.POSIXct(strptime(paste(dm$year, dm$yday), format="%Y %j")) 
-#   dm$dOY <- dm$yday
-#   #master.data <- merge(x=master.data,y=dm[,c('date','tAirMax','tAirMin','airTemp','prcp','dayl')], by='date', all.x=T)
-#   master.data <- merge(x=master.data,y=dm[,c('date','airTemp','prcp','srad','vp','swe','dayl')], by='date', all.x=T)
+   master.data$tAirMin <- master.data$tmin; 
+   master.data$tAirMax <- master.data$tmax
+   master.data$airTemp <- (master.data$tAirMin+master.data$tAirMax)/2
 
 }
 

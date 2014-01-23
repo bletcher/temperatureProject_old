@@ -44,7 +44,7 @@ gRaw <-
 ggsave( file=paste(msWD,'/rawAirWaterTemps.png',sep=''), plot=gRaw, dpi=dpiIn , width=8,height=5, units='in' )
 
 gMosYearly <- 
-  ggplot( et[et$year %in% yearsForGraph & et$site %in% sitesForGraph ,], aes(airTemp,temp))+
+  ggplot( et[et$year %in% 2008 & et$site %in% sitesForGraph ,], aes(airTemp,temp))+
   geom_point() +
   geom_smooth( method = 'nls', formula = y ~ m + ((a-m)/(1+exp(g*(b-x)))), se = F, start = list(a = 40,m = 0, g=1/15, b=10), size=1.25, colour='black') +
   theme_bw(base_size=10) +
